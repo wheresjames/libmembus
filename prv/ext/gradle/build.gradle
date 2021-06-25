@@ -1,0 +1,70 @@
+/*
+    # Build
+    $ gradle build
+
+    # Project name is in settings.gradle file
+    [./settings.gradle]
+        rootProject.name = "libblank"
+
+    # Set global default output directory
+    [~/.gradle/init.gradle]
+        gradle.projectsLoaded {
+            rootProject.allprojects {
+                buildDir = "/home/user/Build/gradle/${rootProject.name}/${project.name}"
+        }
+
+*/
+
+plugins {
+    id "cpp-library"
+    id "cpp-unit-test"
+}
+
+allprojects {
+
+    // Read in configuration
+    def cfgFile = new File('PROJECT.txt').text.replace("\r", "\n").split("\n")
+    for (String line : cfgFile) {
+        def k, parts = line.split(" ")
+        (k, parts) = [ parts.head(), parts.tail() ]
+        k = k.trim()
+        def v = parts.join(" ").trim()
+        try {
+            this."${k}" = v
+            print "[*] ${k.padRight(16)} ${v} \n"
+        } catch(Exception e) {
+            print "[ ] ${k.padRight(16)} ${v} \n"
+        }
+
+    }
+
+    buildDir = './bld'
+}
+
+repositories {
+    mavenLocal()
+}
+
+model {
+    toolChains {
+        gcc(Gcc) {
+            eachPlatform {
+                cppCompiler.withArguments { args ->
+                    args << "-std=c++17" << "-Wall" << "-Werror" << "-Wextra" \
+                         << "-DAPPNAME=\"${project.name}\"" << "-DAPPVER=\"${version}\"" \
+                         << "-DAPPBUILD=\"${new Date().format( 'yyyy.MM.dd.HHmm' )}\""
+                }
+            }
+        }
+    }
+}
+
+unitTest {
+    binaries.whenElementKnown(CppTestExecutable) { binary ->
+        if (binary.targetMachine.operatingSystemFamily.linux) {
+            binary.linkTask.get().linkerArgs.add('-pthread')
+            binary.linkTask.get().linkerArgs.add('-lrt')
+        }
+    }
+}
+

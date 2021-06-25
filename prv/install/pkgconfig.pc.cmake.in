@@ -1,0 +1,13 @@
+libdir=@CMAKE_INSTALL_PREFIX@/lib
+includedir=@CMAKE_INSTALL_PREFIX@/include/@APPNAME@
+
+Name: @APPNAME@
+Description: @APPDESC@
+URL: @APPURL@
+Version: @APPVER@
+Build: @APPBUILD@
+Company: @APPCOMPANY@
+Author: @APPAUTHOR@
+
+Libs: -L${libdir} -lblank
+Cflags: -I${includedir}

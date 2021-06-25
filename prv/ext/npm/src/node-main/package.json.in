@@ -1,0 +1,12 @@
+{
+  "name": "@APPNAME@",
+  "description": "@APPDESC@",
+  "version": "@APPVER@",
+  "author": "@APPAUTHOR@ <@APPEMAIL@> (@APPURL@)",
+  "license": "@APPLICENSE@",
+  "main": "./bin/@APPNAME@.node",
+  "scripts": {
+    "install": "cmake . -B ./bld && cmake --build ./bld -j8"
+  },
+  "devDependencies": {}
+}

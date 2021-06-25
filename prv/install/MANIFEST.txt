@@ -1,0 +1,12 @@
+/usr/local/lib/libblank.so
+/usr/local/include/libblank.h
+/usr/local/include/libblank
+/usr/bin/libblank
+/usr/share/libblank
+/usr/local/bin/libblank
+/usr/local/share/libblank
+/etc/libblank
+/usr/lib/pkgconfig/libblank.pc
+/usr/local/lib/pkgconfig/libblank.pc
+/usr/man/man1/libblank.1
+/usr/local/man/man1/libblank.1

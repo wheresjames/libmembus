@@ -1,0 +1,8 @@
+name            libmembus
+version         0.1.0
+description     C++ Shared memory library
+company         wheresjames
+author          Robert Umbehant
+email           libmembus@wheresjames.com
+url             https://github.com/wheresjames/libmembus
+license         MIT
