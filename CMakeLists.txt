@@ -38,15 +38,20 @@ if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
     message(FATAL_ERROR "In-source builds not allowed, try cmake --build ./bld")
 endif()
 
+message(STATUS "CMAKE_SOURCE_DIR = ${CMAKE_SOURCE_DIR}")
+message(STATUS "CMAKE_BINARY_DIR = ${CMAKE_BINARY_DIR}")
+message(STATUS "CMAKE_CURRENT_SOURCE_DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
+message(STATUS "CMAKE_CURRENT_BINARY_DIR = ${CMAKE_CURRENT_BINARY_DIR}")
+
 
 #====================================================================
 # Sub directories to build
 set(SUBDIRS "")
-file(GLOB srcdirs RELATIVE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/*)
+file(GLOB srcdirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/src/*)
 foreach(sub ${srcdirs})
     if(${sub} MATCHES "^[^_]")
-        if(IS_DIRECTORY "${CMAKE_SOURCE_DIR}/src/${sub}")
-            list(APPEND SUBDIRS "${CMAKE_SOURCE_DIR}/src/${sub}")
+        if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/${sub}")
+            list(APPEND SUBDIRS "${CMAKE_CURRENT_SOURCE_DIR}/src/${sub}")
         endif()
     endif()
 endforeach()
@@ -129,15 +134,15 @@ set(CMAKE_INSTALL_LIBDIR lib)
 set(CMAKE_INSTALL_INCLUDEDIR include)
 set(CMAKE_INSTALL_OLDINCLUDEDIR include)
 set(CMAKE_INSTALL_DATAROOTDIR share)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 
 
 #====================================================================
 # Setup Conan
-if(EXISTS ${CMAKE_SOURCE_DIR}/conanbuildinfo.cmake)
-    include(${CMAKE_SOURCE_DIR}/conanbuildinfo.cmake)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/conanbuildinfo.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/conanbuildinfo.cmake)
     conan_basic_setup()
 endif()
 
@@ -200,23 +205,23 @@ if(UNIX AND NOT APPLE)
     # Check for md2man (md2man-roff ./README.md > README.1)
     if (EXISTS /usr/local/bin/md2man-roff)
         message(STATUS "Generating man page with md2man")
-        add_custom_target(man ALL /usr/local/bin/md2man-roff "${CMAKE_SOURCE_DIR}/README.md" > "${CMAKE_BINARY_DIR}/libmembus.1"
+        add_custom_target(man ALL /usr/local/bin/md2man-roff "${CMAKE_CURRENT_SOURCE_DIR}/README.md" > "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-        install(FILES "${CMAKE_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
 
     # Check for ronn (ronn -r --pipe README.md > ./bld/README.1)
     elseif (EXISTS /usr/bin/ronn)
         message(STATUS "Generating man page with ronn")
-        add_custom_target(man ALL /usr/bin/ronn -r --pipe "${CMAKE_SOURCE_DIR}/README.md" > "${CMAKE_BINARY_DIR}/libmembus.1"
+        add_custom_target(man ALL /usr/bin/ronn -r --pipe "${CMAKE_CURRENT_SOURCE_DIR}/README.md" > "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-        install(FILES "${CMAKE_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
 
     # Check for pandoc (pandoc README.md -t man -o README.1)
     elseif (EXISTS /usr/bin/pandoc)
         message(STATUS "Generating man page with pandoc")
-        add_custom_target(man ALL /usr/bin/pandoc "${CMAKE_SOURCE_DIR}/prv/install/README.md" -f markdown -t man -o "${CMAKE_BINARY_DIR}/libmembus.1"
+        add_custom_target(man ALL /usr/bin/pandoc "${CMAKE_CURRENT_SOURCE_DIR}/prv/install/README.md" -f markdown -t man -o "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-        install(FILES "${CMAKE_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
 
     endif()
 endif()
@@ -229,7 +234,7 @@ if (SKBUILD)
 else()
     if(UNIX AND NOT APPLE)
         message(STATUS "Creating pkg-config file")
-        configure_file("${CMAKE_SOURCE_DIR}/prv/install/pkgconfig.pc.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.pc"	@ONLY)
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/prv/install/pkgconfig.pc.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.pc"	@ONLY)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig" COMPONENT admin)
     endif()
 endif()
@@ -242,18 +247,18 @@ if (SKBUILD)
 else()
     include(CMakePackageConfigHelpers)
     write_basic_package_version_file(
-    "${CMAKE_BINARY_DIR}/${APPNAME}-config-version.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/${APPNAME}-config-version.cmake"
     VERSION ${APPVER}
     COMPATIBILITY AnyNewerVersion
     )
 
-    configure_file("${CMAKE_SOURCE_DIR}/prv/install/package-config.cmake.in" "${CMAKE_BINARY_DIR}/${APPNAME}-config.cmake" @ONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/prv/install/package-config.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/${APPNAME}-config.cmake" @ONLY)
 
     set(ConfigPackageLocation lib/cmake/${APPNAME})
     install(
     FILES
-        "${CMAKE_BINARY_DIR}/${APPNAME}-config.cmake"
-        "${CMAKE_BINARY_DIR}/${APPNAME}-config-version.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/${APPNAME}-config.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/${APPNAME}-config-version.cmake"
     DESTINATION
         ${ConfigPackageLocation}
     COMPONENT
@@ -267,11 +272,11 @@ endif()
 if (UNIX)
     set(INSTALL_SHAREDIR ${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME})
 
-    install(PROGRAMS "${CMAKE_SOURCE_DIR}/run.sh" RENAME ${PROJECT_NAME} DESTINATION bin COMPONENT admin)
-    install(DIRECTORY "${CMAKE_SOURCE_DIR}/prv/sh/" DESTINATION ${INSTALL_SHAREDIR} COMPONENT admin)
+    install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/run.sh" RENAME ${PROJECT_NAME} DESTINATION bin COMPONENT admin)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/prv/sh/" DESTINATION ${INSTALL_SHAREDIR} COMPONENT admin)
 
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/prv/install/info.in ${CMAKE_BINARY_DIR}/info.txt @ONLY)
-    install(FILES "${CMAKE_BINARY_DIR}/info.txt" DESTINATION ${INSTALL_SHAREDIR} COMPONENT admin)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/prv/install/info.in ${CMAKE_CURRENT_BINARY_DIR}/info.txt @ONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/info.txt" DESTINATION ${INSTALL_SHAREDIR} COMPONENT admin)
 
     # Run ldconfig
     if (NOT APPLE)
@@ -289,11 +294,11 @@ if (UNIX)
     #--------------------------------------
     # Create install manifest
     install(CODE "string(REPLACE \";\" \"\\n\" MY_CMAKE_INSTALL_MANIFEST_CONTENT \"\$\{CMAKE_INSTALL_MANIFEST_FILES\}\")\n\
-                file(WRITE ${CMAKE_BINARY_DIR}/${MANIFESTFILE} \"\$\{MY_CMAKE_INSTALL_MANIFEST_CONTENT\}\\n${INSTALL_SHAREDIR}/${MANIFESTFILE}\")")
-    install(FILES "${CMAKE_BINARY_DIR}/${MANIFESTFILE}" DESTINATION ${INSTALL_SHAREDIR} COMPONENT admin)
+                file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${MANIFESTFILE} \"\$\{MY_CMAKE_INSTALL_MANIFEST_CONTENT\}\\n${INSTALL_SHAREDIR}/${MANIFESTFILE}\")")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${MANIFESTFILE}" DESTINATION ${INSTALL_SHAREDIR} COMPONENT admin)
 
     # Use this instead of above if you prefer to manually specify the files/dirs to be removed on uninstall
-    # install(FILES "${CMAKE_SOURCE_DIR}/prv/install/${MANIFESTFILE}" DESTINATION INSTALL_SHAREDIR COMPONENT admin)
+    # install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/prv/install/${MANIFESTFILE}" DESTINATION INSTALL_SHAREDIR COMPONENT admin)
 
 endif()
 
@@ -310,7 +315,7 @@ set(CPACK_PACKAGE_VERSION "${APPVER}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${APPDESC}")
 
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_SOURCE_DIR}/prv/install/deb/postinst")
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/prv/install/deb/postinst")
 
 include(CPack)
 

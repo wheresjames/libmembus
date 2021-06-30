@@ -1,5 +1,5 @@
 
-#include "libblank.h"
+#include "libmembus.h"
 
 
 //=================================================================================================
@@ -68,7 +68,7 @@ NAPI_DEFINE_CLASS(CTestClass)
 NAPI_DEFINE_CLASS_END()
 
 
-NAPI_BEGIN_EXPORTS(libblank)
+NAPI_BEGIN_EXPORTS(libmembus)
 
     // Export CTestClass
     NAPI_EXPORT_CLASS(CTestClass);

@@ -2,7 +2,7 @@
 #====================================================================
 
 set(TARGET ${PROJECT_NAME}-test)
-set(BINARY ${CMAKE_BINARY_DIR}/lib/test.js)
+set(BINARY ${PROJECT_BINARY_DIR}/lib/test.js)
 
 add_custom_target(${TARGET} ALL
                   DEPENDS ${PROJECT_NAME}
@@ -11,7 +11,7 @@ add_custom_target(${TARGET} ALL
 enable_testing()
 
 add_test(NAME ${TARGET}
-         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+         WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/lib"
          COMMAND node ${BINARY})
 
 set_tests_properties(${TARGET} PROPERTIES TIMEOUT 10)
@@ -20,7 +20,7 @@ set_tests_properties(${TARGET} PROPERTIES TIMEOUT 10)
 add_custom_command(TARGET ${TARGET} POST_BUILD
                    COMMAND ${CMAKE_COMMAND} -E copy 
                         "${CMAKE_CURRENT_SOURCE_DIR}/js/test.js"
-                        "${CMAKE_BINARY_DIR}/lib/test.js")
+                        "${PROJECT_BINARY_DIR}/lib/test.js")
 
 # Execute test
 add_custom_command(TARGET ${TARGET} POST_BUILD

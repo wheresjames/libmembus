@@ -54,24 +54,24 @@ def runTests(_p):
     assert True
     assert not False
 
-    # from libblank import libblank
-    import libblank
-    if hasattr(libblank, "libblank"):
-        libblank = libblank.libblank
+    # from libmembus import libmembus
+    import libmembus
+    if hasattr(libmembus, "libmembus"):
+        libmembus = libmembus.libmembus
 
     # Module attributes
-    print(dir(libblank))
+    print(dir(libmembus))
 
-    # for k in dir(libblank):
-    #     print("%s = %s" % (k, getattr(libblank, k)))
+    # for k in dir(libmembus):
+    #     print("%s = %s" % (k, getattr(libmembus, k)))
 
-    print("[%s] %s" % (libblank.__name__, libblank.__file__))
+    print("[%s] %s" % (libmembus.__name__, libmembus.__file__))
 
     # Show version number
-    print("libblank version : %s [%s]" % (libblank.__version__, libblank.__build__))
+    print("libmembus version : %s [%s]" % (libmembus.__version__, libmembus.__build__))
 
 
-    pt = libblank.pytest()
+    pt = libmembus.pytest()
 
     assert pt.add(2, 3) == 5
 

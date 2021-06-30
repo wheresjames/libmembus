@@ -10,7 +10,7 @@ if [[ "init" == $1 ]]; then
     # Install conan
     python3 -m pip install conan
 
-    # Install a web browser to view help file (libblank help)
+    # Install a web browser to view help file (libmembus help)
     apt-get -yq install lynx
 
 fi

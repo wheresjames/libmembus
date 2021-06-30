@@ -49,7 +49,7 @@ NAPI_END_EXPORTS()
 
 /// @cond DOXYGEN_EXCLUDE
 
-namespace LIBBLANK_NS
+namespace LIBMEMBUS_NS
 {
 
 //=================================================================================================
@@ -235,7 +235,7 @@ static Napi::Number cvtV(const Napi::Env &env, long double v)
                                        Napi::Function::New(env, \
                                             [](const Napi::CallbackInfo& info) \
                                             {   Napi::Env env = info.Env(); \
-                                                return lbk::cvtV(env, lbk::callFunction(env, info, f)); \
+                                                return mmb::cvtV(env, mmb::callFunction(env, info, f)); \
                                             }) \
                                        );
 
@@ -244,7 +244,7 @@ static Napi::Number cvtV(const Napi::Env &env, long double v)
                                        Napi::Function::New(env, \
                                             [](const Napi::CallbackInfo& info) \
                                             {   Napi::Env env = info.Env(); \
-                                                return lbk::cvtV(env, lbk::callFunction(env, info, f)); \
+                                                return mmb::cvtV(env, mmb::callFunction(env, info, f)); \
                                             }) \
                                        );
 
@@ -252,24 +252,24 @@ static Napi::Number cvtV(const Napi::Env &env, long double v)
 //=================================================================================================
 // Class wrapper
 
-#define NAPI_CONSTRUCTOR_1(c) if (1 == info.Length()) m_c = c(lbk::cvtP(info, 0));
-#define NAPI_CONSTRUCTOR_2(c) if (2 == info.Length()) m_c = c(lbk::cvtP(info, 0), lbk::cvtP(info, 1));
+#define NAPI_CONSTRUCTOR_1(c) if (1 == info.Length()) m_c = c(mmb::cvtP(info, 0));
+#define NAPI_CONSTRUCTOR_2(c) if (2 == info.Length()) m_c = c(mmb::cvtP(info, 0), mmb::cvtP(info, 1));
 #define NAPI_CONSTRUCTOR_3(c) if (3 == info.Length()) \
-    m_c = c(lbk::cvtP(info, 0), lbk::cvtP(info, 1), lbk::cvtP(info, 2));
+    m_c = c(mmb::cvtP(info, 0), mmb::cvtP(info, 1), mmb::cvtP(info, 2));
 #define NAPI_CONSTRUCTOR_4(c) if (4 == info.Length()) \
-    m_c = c(lbk::cvtP(info, 0), lbk::cvtP(info, 1), lbk::cvtP(info, 2), lbk::cvtP(info, 3));
+    m_c = c(mmb::cvtP(info, 0), mmb::cvtP(info, 1), mmb::cvtP(info, 2), mmb::cvtP(info, 3));
 #define NAPI_CONSTRUCTOR_5(c) if (5 == info.Length()) \
-    m_c = c(lbk::cvtP(info, 0), lbk::cvtP(info, 1), lbk::cvtP(info, 2), lbk::cvtP(info, 3), \
-            lbk::cvtP(info, 4));
+    m_c = c(mmb::cvtP(info, 0), mmb::cvtP(info, 1), mmb::cvtP(info, 2), mmb::cvtP(info, 3), \
+            mmb::cvtP(info, 4));
 #define NAPI_CONSTRUCTOR_6(c) if (6 == info.Length()) \
-    m_c = c(lbk::cvtP(info, 0), lbk::cvtP(info, 1), lbk::cvtP(info, 2), lbk::cvtP(info, 3), \
-            lbk::cvtP(info, 4), lbk::cvtP(info, 5));
+    m_c = c(mmb::cvtP(info, 0), mmb::cvtP(info, 1), mmb::cvtP(info, 2), mmb::cvtP(info, 3), \
+            mmb::cvtP(info, 4), mmb::cvtP(info, 5));
 #define NAPI_CONSTRUCTOR_7(c) if (7 == info.Length()) \
-    m_c = c(lbk::cvtP(info, 0), lbk::cvtP(info, 1), lbk::cvtP(info, 2), lbk::cvtP(info, 3), \
-            lbk::cvtP(info, 4), lbk::cvtP(info, 5), lbk::cvtP(info, 6));
+    m_c = c(mmb::cvtP(info, 0), mmb::cvtP(info, 1), mmb::cvtP(info, 2), mmb::cvtP(info, 3), \
+            mmb::cvtP(info, 4), mmb::cvtP(info, 5), mmb::cvtP(info, 6));
 #define NAPI_CONSTRUCTOR_8(c) if (8 == info.Length()) \
-    m_c = c(lbk::cvtP(info, 0), lbk::cvtP(info, 1), lbk::cvtP(info, 2), lbk::cvtP(info, 3), \
-            lbk::cvtP(info, 4), lbk::cvtP(info, 5), lbk::cvtP(info, 6), lbk::cvtP(info, 7));
+    m_c = c(mmb::cvtP(info, 0), mmb::cvtP(info, 1), mmb::cvtP(info, 2), mmb::cvtP(info, 3), \
+            mmb::cvtP(info, 4), mmb::cvtP(info, 5), mmb::cvtP(info, 6), mmb::cvtP(info, 7));
 
 #define NAPI_DEFINE_CLASS(c) \
     static Napi::FunctionReference ClassWrapper_constructor_##c; \
@@ -305,13 +305,13 @@ static Napi::Number cvtV(const Napi::Env &env, long double v)
 #define NAPI_MEMBER_FUNCTION(c, f) \
             getDesc(#f, \
                     [](napi_env env, napi_callback_info info) -> napi_value \
-                    {   return lbk::cvtV(env, lbk::callMemberFunction(env, info, &getClassPtr(env, info)->m_c, &c::f)); \
+                    {   return mmb::cvtV(env, mmb::callMemberFunction(env, info, &getClassPtr(env, info)->m_c, &c::f)); \
                     }),
 
 #define NAPI_MEMBER_FUNCTION_AS(c, f, n) \
             getDesc(n, \
                     [](napi_env env, napi_callback_info info) -> napi_value \
-                    {   return lbk::cvtV(env, lbk::callMemberFunction(env, info, &getClassPtr(env, info)->m_c, &c::f)); \
+                    {   return mmb::cvtV(env, mmb::callMemberFunction(env, info, &getClassPtr(env, info)->m_c, &c::f)); \
                     }),
 
 #define NAPI_DEFINE_CLASS_END() \

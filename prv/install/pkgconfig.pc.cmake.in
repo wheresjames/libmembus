@@ -9,5 +9,5 @@ Build: @APPBUILD@
 Company: @APPCOMPANY@
 Author: @APPAUTHOR@
 
-Libs: -L${libdir} -lblank
+Libs: -L${libdir} -lmembus
 Cflags: -I${includedir}

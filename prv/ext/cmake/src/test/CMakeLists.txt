@@ -4,7 +4,7 @@
 # Output
 set(BINARY ${PROJECT_NAME}-test)
 
-include_directories("${CMAKE_SOURCE_DIR}/src/main/headers")
+include_directories("${PROJECT_SOURCE_DIR}/src/main/headers")
 
 file(GLOB_RECURSE SOURCES "cpp/*.cpp")
 

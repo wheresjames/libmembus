@@ -67,13 +67,16 @@ if [[ $1 == "test-cmake" ]]; then
 
     showBanner "CMake Test"
 
-    cp -R /code/libblank /code/libblank-cmake
-    exitOnError "test-cmake: Failed to copy to directory : /code/libblank-cmake"
+    cp -R /code/libmembus /code/libmembus-cmake
+    exitOnError "test-cmake: Failed to copy to directory : /code/libmembus-cmake"
 
-    cd /code/libblank-cmake
-    exitOnError "test-cmake: Failed to switch to directory : /code/libblank-cmake"
+    cd /code/libmembus-cmake
+    exitOnError "test-cmake: Failed to switch to directory : /code/libmembus-cmake"
 
     ./clean.sh
+
+    ./add.sh cmake -y
+    exitOnError "test-cmake: Failed to add cmake to project"
 
     cmake . -B ./bld -G "Unix Makefiles"
     exitOnError "test-cmake: Failed to configure"
@@ -84,7 +87,7 @@ if [[ $1 == "test-cmake" ]]; then
     cmake --install ./bld
     exitOnError "test-cmake: Failed to install"
 
-    libblank uninstall
+    libmembus uninstall
     exitOnError "test-cmake: Failed to uninstall"
 
     # --- Install with deb file
@@ -92,13 +95,13 @@ if [[ $1 == "test-cmake" ]]; then
     # cpack -B ./pck --config ./bld/CPackConfig.cmake -G DEB -C Release
     # exitOnError "test-conan: Failed to create package"
 
-    # sudo apt install ./pck/libblank-0.1.0-Linux.deb
+    # sudo apt install ./pck/libmembus-0.1.0-Linux.deb
     # exitOnError "test-conan: Failed to install deb package"
 
-    # libblank test
+    # libmembus test
     # exitOnError "test-cmake: Failed to test"
 
-    # apt remove libblank
+    # apt remove libmembus
     # exitOnError "test-cmake: Failed to uninstall"
 
 fi
@@ -113,11 +116,11 @@ if [[ $1 == "test-conan" ]]; then
     apt-get -yqq install python3 python3-pip
     python3 -m pip install conan
 
-    cp -R /code/libblank /code/libblank-conan
-    exitOnError "test-conan: Failed to copy to directory : /code/libblank-conan"
+    cp -R /code/libmembus /code/libmembus-conan
+    exitOnError "test-conan: Failed to copy to directory : /code/libmembus-conan"
 
-    cd /code/libblank-conan
-    exitOnError "test-conan: Failed to switch to directory : /code/libblank-conan"
+    cd /code/libmembus-conan
+    exitOnError "test-conan: Failed to switch to directory : /code/libmembus-conan"
 
     ./clean.sh
 
@@ -133,7 +136,7 @@ if [[ $1 == "test-conan" ]]; then
     cmake --install ./bld
     exitOnError "test-conan: Failed to install"
 
-    libblank uninstall
+    libmembus uninstall
     exitOnError "test-conan: Failed to uninstall"
 
     # --- Install with deb file
@@ -141,13 +144,13 @@ if [[ $1 == "test-conan" ]]; then
     # conan package .
     # exitOnError "test-conan: Failed to create package"
 
-    # sudo apt install ./pck/libblank-0.1.0-Linux.deb
+    # sudo apt install ./pck/libmembus-0.1.0-Linux.deb
     # exitOnError "test-conan: Failed to install deb package"
 
-    # libblank test
+    # libmembus test
     # exitOnError "test-conan: Failed to test"
 
-    # apt remove libblank
+    # apt remove libmembus
     # exitOnError "test-cmake: Failed to uninstall"
 
 fi
@@ -194,11 +197,11 @@ if [[ $1 == "test-gradle" ]]; then
 
     fi
 
-    cp -R /code/libblank /code/libblank-gradle
-    exitOnError "test-gradle: Failed to copy to directory : /code/libblank-gradle"
+    cp -R /code/libmembus /code/libmembus-gradle
+    exitOnError "test-gradle: Failed to copy to directory : /code/libmembus-gradle"
 
-    cd /code/libblank-gradle
-    exitOnError "test-gradle: Failed to switch to directory : /code/libblank-gradle"
+    cd /code/libmembus-gradle
+    exitOnError "test-gradle: Failed to switch to directory : /code/libmembus-gradle"
 
     ./clean.sh
 
@@ -220,11 +223,11 @@ if [[ $1 == "test-pip" ]]; then
     apt-get -yqq install python3 python3-pip
     exitOnError "test-pip: Failed to install dependencies"
 
-    cp -R /code/libblank /code/libblank-pip
-    exitOnError "test-pip: Failed to copy to directory : /code/libblank-pip"
+    cp -R /code/libmembus /code/libmembus-pip
+    exitOnError "test-pip: Failed to copy to directory : /code/libmembus-pip"
 
-    cd /code/libblank-pip
-    exitOnError "test-pip: Failed to switch to directory : /code/libblank-pip"
+    cd /code/libmembus-pip
+    exitOnError "test-pip: Failed to switch to directory : /code/libmembus-pip"
 
     ./clean.sh
 
@@ -241,7 +244,7 @@ if [[ $1 == "test-pip" ]]; then
     # python3 ./src/pytest/py/test.py
     # exitOnError "test-pip: Failed to pass test"
 
-    pip3 uninstall -y libblank
+    pip3 uninstall -y libmembus
     exitOnError "test-pip: Failed to uninstall"
 
 fi
@@ -255,11 +258,11 @@ if [[ $1 == "test-npm" ]]; then
     apt-get -yqq install git nodejs npm
     exitOnError "test-npm: Failed to install dependencies"
 
-    cp -R /code/libblank /code/libblank-npm
-    exitOnError "test-npm: Failed to copy to directory : /code/libblank-npm"
+    cp -R /code/libmembus /code/libmembus-npm
+    exitOnError "test-npm: Failed to copy to directory : /code/libmembus-npm"
 
-    cd /code/libblank-npm
-    exitOnError "test-npm: Failed to switch to directory : /code/libblank-npm"
+    cd /code/libmembus-npm
+    exitOnError "test-npm: Failed to switch to directory : /code/libmembus-npm"
 
     ./clean.sh
 
@@ -282,7 +285,7 @@ if [[ $1 == "test-npm" ]]; then
     node ./src/node-test/js/test.js
     exitOnError "test-npm: Failed to pass test"
 
-    npm -g rm libblank
+    npm -g rm libmembus
     exitOnError "test-npm: Failed to uninstall"
 
 fi

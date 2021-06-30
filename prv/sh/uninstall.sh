@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #--------------------------------------------------------------------------------------------------
-if findIn "dpkg -l" "libblank"; then
-    dpkg -r libblank
+if findIn "dpkg -l" "libmembus"; then
+    dpkg -r libmembus
     exitOnError "Failed to uninstall"
     exit 0
 fi
@@ -27,15 +27,15 @@ if [ ! -f "${INFILE}" ]; then
 
     if [ -f "$SHDIR/PYTHON.txt" ]; then
         if [ -f `which python3` ]; then
-            python3 -m pip uninstall -y libblank
+            python3 -m pip uninstall -y libmembus
         elif [ -f `which python` ]; then
-            python -m pip uninstall -y libblank
+            python -m pip uninstall -y libmembus
         fi
     fi
 
     if [ "$EUID" == "0" ]; then
         if [ -f `which dpkg` ]; then
-            dpkg -r libblank
+            dpkg -r libmembus
         fi
     fi
 
@@ -66,7 +66,7 @@ for v in $FILES; do
 done
 
 # Library name (./rename.sh will change this)
-LIBNAME="libblank"
+LIBNAME="libmembus"
 
 # /usr/bin/${LIBNAME}
 MINSAFESIZE=$((9 + ${#LIBNAME}))

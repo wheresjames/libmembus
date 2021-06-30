@@ -4,7 +4,7 @@
 
     # Project name is in settings.gradle file
     [./settings.gradle]
-        rootProject.name = "libblank"
+        rootProject.name = "libmembus"
 
     # Set global default output directory
     [~/.gradle/init.gradle]

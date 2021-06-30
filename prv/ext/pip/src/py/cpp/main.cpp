@@ -1,10 +1,10 @@
 
 #include <pybind11/pybind11.h>
 
-#include "libblank.h"
+#include "libmembus.h"
 
 namespace py = pybind11;
-namespace LIBBLANK_NS
+namespace LIBMEMBUS_NS
 {
 
 class pytest

@@ -1,7 +1,7 @@
 
 #====================================================================
 set(TARGET ${PROJECT_NAME}-test)
-set(BINARY ${CMAKE_BINARY_DIR}/lib/test.py)
+set(BINARY ${PROJECT_BINARY_DIR}/lib/test.py)
 
 
 #====================================================================
@@ -49,7 +49,7 @@ add_custom_target(${TARGET} ALL
 
 enable_testing()
 add_test(NAME ${TARGET}
-            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+            WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/lib"
             COMMAND ${PYEXE} ${BINARY})
 
 set_tests_properties(${TARGET} PROPERTIES TIMEOUT 10)

@@ -1,6 +1,6 @@
 #pragma once
 
-#define LIBBLANK_NS lbk
+#define LIBMEMBUS_NS mmb
 
 #include <memory>
 #include <exception>

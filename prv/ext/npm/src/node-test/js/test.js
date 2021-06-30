@@ -1,7 +1,7 @@
 #!/usr/bin/node
 
 var assert = require('assert');
-var addon = require('libblank');
+var addon = require('libmembus');
 
 console.log(addon.sayHello(7, "8"));
 

@@ -1,7 +1,7 @@
 
 #pragma once
 
-namespace LIBBLANK_NS
+namespace LIBMEMBUS_NS
 {
 
 /** This is an example class

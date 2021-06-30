@@ -1,17 +1,17 @@
 
 #include <iostream>
 
-#include "libblank.h"
+#include "libmembus.h"
 
-#if defined(LIBBLANK_POSIX)
+#if defined(LIBMEMBUS_POSIX)
 #   include <unistd.h>
 #   include <signal.h>
-#elif defined(LIBBLANK_WINDOWS)
+#elif defined(LIBMEMBUS_WINDOWS)
 #   include <windows.h>
 #endif
 
 
-namespace LIBBLANK_NS
+namespace LIBMEMBUS_NS
 {
 
 static volatile int *g_fCount = 0;
@@ -28,7 +28,7 @@ static void ctrl_c_handler(int /*s*/)
 
 
 //-------------------------------------------------------------------
-#if defined(LIBBLANK_POSIX)
+#if defined(LIBMEMBUS_POSIX)
 
 void install_ctrl_c_handler(volatile int *fCount)
 {
@@ -45,7 +45,7 @@ void install_ctrl_c_handler(volatile int *fCount)
 
 
 //-------------------------------------------------------------------
-#elif defined(LIBBLANK_WINDOWS)
+#elif defined(LIBMEMBUS_WINDOWS)
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
