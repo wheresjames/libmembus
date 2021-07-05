@@ -16,6 +16,21 @@ file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
 
 add_library(${BINARY} ${SOURCES})
 
+#====================================================================
+
+if (NOT CONAN_COMPILER)
+    find_package(Boost)
+    if(NOT Boost_FOUND)
+    message(FATAL_ERROR "Boost not found")
+    endif()
+    message(STATUS "Found Boost ${Boost_VERSION}")
+    include_directories("${Boost_INCLUDE_DIRS}")
+    link_directories("${Boost_LIBRARIES}")
+    target_link_libraries(${BINARY} LINK_PUBLIC ${Boost_LIBRARIES})
+endif()
+
+#====================================================================
+
 include(GenerateExportHeader)
 generate_export_header(${BINARY})
 
