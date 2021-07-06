@@ -44,15 +44,16 @@ generate_export_header(${BINARY})
 set_target_properties(${BINARY} PROPERTIES PREFIX "")
 set_target_properties(${BINARY} PROPERTIES VERSION ${APPVER} SOVERSION ${APPMAJ}.${APPMIN})
 set_target_properties(${BINARY} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+install(TARGETS ${BINARY} DESTINATION lib COMPONENT lib)
 
 # Static
-set_target_properties(${BINARY}_static PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
+# set_target_properties(${BINARY}_static PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
 set_target_properties(${BINARY}_static PROPERTIES PREFIX "")
 set_target_properties(${BINARY}_static PROPERTIES VERSION ${APPVER} SOVERSION ${APPMAJ}.${APPMIN})
 set_target_properties(${BINARY}_static PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-
-# Install
-install(TARGETS ${BINARY} DESTINATION lib COMPONENT lib)
 install(TARGETS ${BINARY}_static DESTINATION lib COMPONENT lib)
+
+
+# Install source files
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/headers/" DESTINATION include COMPONENT lib)
 
