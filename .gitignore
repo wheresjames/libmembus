@@ -17,7 +17,6 @@ creds
 /Testing/
 CMakeCache.txt
 *.cache
-*.cmake
 
 ## Conan
 conan.lock
