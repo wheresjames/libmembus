@@ -22,18 +22,12 @@ add_library(${BINARY}_obj OBJECT ${SOURCES})
 add_library(${BINARY} SHARED $<TARGET_OBJECTS:${BINARY}_obj>)
 add_library(${BINARY}_static STATIC $<TARGET_OBJECTS:${BINARY}_obj>)
 
-#====================================================================
-# Find boost
 if (NOT CONAN_COMPILER)
-    find_package(Boost)
-    if(NOT Boost_FOUND)
-    message(FATAL_ERROR "Boost not found")
-    endif()
-    message(STATUS "Found Boost ${Boost_VERSION}")
-    include_directories("${Boost_INCLUDE_DIRS}")
-    link_directories("${Boost_LIBRARIES}")
+    include(../boost.cmake)
     target_link_libraries(${BINARY} LINK_PUBLIC ${Boost_LIBRARIES})
+    target_link_libraries(${BINARY}_static LINK_PUBLIC ${Boost_LIBRARIES})
 endif()
+
 
 #====================================================================
 
@@ -52,7 +46,6 @@ set_target_properties(${BINARY}_static PROPERTIES PREFIX "")
 set_target_properties(${BINARY}_static PROPERTIES VERSION ${APPVER} SOVERSION ${APPMAJ}.${APPMIN})
 set_target_properties(${BINARY}_static PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 install(TARGETS ${BINARY}_static DESTINATION lib COMPONENT lib)
-
 
 # Install source files
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/headers/" DESTINATION include COMPONENT lib)

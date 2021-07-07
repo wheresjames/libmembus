@@ -38,11 +38,6 @@ if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
     message(FATAL_ERROR "In-source builds not allowed, try cmake --build ./bld")
 endif()
 
-message(STATUS "CMAKE_SOURCE_DIR = ${CMAKE_SOURCE_DIR}")
-message(STATUS "CMAKE_BINARY_DIR = ${CMAKE_BINARY_DIR}")
-message(STATUS "CMAKE_CURRENT_SOURCE_DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
-message(STATUS "CMAKE_CURRENT_BINARY_DIR = ${CMAKE_CURRENT_BINARY_DIR}")
-
 
 #====================================================================
 # Sub directories to build
@@ -173,9 +168,23 @@ endfunction()
 
 #====================================================================
 # Info
-message(STATUS "---------------------------------------------------")
+message(STATUS "-------------------------------------------------------------------------")
 message(STATUS "${APPNAME} - ${APPVER} (${APPBUILD})")
-message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "-------------------------------------------------------------------------")
+message(STATUS "CMAKE_INSTALL_PREFIX     : ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "CMAKE_SOURCE_DIR         : ${CMAKE_SOURCE_DIR}")
+message(STATUS "CMAKE_BINARY_DIR         : ${CMAKE_BINARY_DIR}")
+message(STATUS "CMAKE_CURRENT_SOURCE_DIR : ${CMAKE_CURRENT_SOURCE_DIR}")
+message(STATUS "CMAKE_CURRENT_BINARY_DIR : ${CMAKE_CURRENT_BINARY_DIR}")
+
+execute_process(COMMAND git describe --tags --abbrev=0 OUTPUT_VARIABLE GIT_LASTTAG)
+string(STRIP ${GIT_LASTTAG} GIT_LASTTAG)
+if("v${APPVER}" STREQUAL "${GIT_LASTTAG}")
+    message(STATUS "######################## : git tag matches version: ${GIT_LASTTAG} == ${APPVER}")
+else()
+    message(AUTHOR_WARNING "######################### : git tag does not match version: ${GIT_LASTTAG} != ${APPVER}")
+endif()
+message(STATUS "-------------------------------------------------------------------------")
 
 
 #====================================================================

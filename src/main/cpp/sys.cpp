@@ -1,7 +1,7 @@
 
 #include <iostream>
 
-#include "libmembus/libmembus_internal.h"
+#include "libmembus_internal.h"
 
 #if defined(LIBMEMBUS_POSIX)
 #   include <unistd.h>

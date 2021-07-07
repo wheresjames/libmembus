@@ -10,7 +10,7 @@ file(GLOB_RECURSE SOURCES "cpp/*.cpp")
 
 add_executable(${BINARY} ${SOURCES})
 
-target_link_libraries(${BINARY} PRIVATE ${PROJECT_NAME})
+target_link_libraries(${BINARY} PRIVATE ${PROJECT_NAME}_static)
 
 if(UNIX)
     target_link_libraries(${BINARY} PRIVATE pthread rt)

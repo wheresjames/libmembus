@@ -1,5 +1,5 @@
 
-#include "libmembus/libmembus_internal.h"
+#include "libmembus_internal.h"
 
 namespace LIBMEMBUS_NS
 {
