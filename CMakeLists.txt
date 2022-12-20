@@ -34,7 +34,8 @@
 cmake_minimum_required(VERSION 3.15)
 
 # Don't allow in builds in the source tree
-if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR}
+    OR ${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_BINARY_DIR})
     message(FATAL_ERROR "In-source builds not allowed, try cmake --build ./bld")
 endif()
 
@@ -148,7 +149,7 @@ endif()
 # Just a really useful debugging function
 # https://stackoverflow.com/questions/9298278
 #
-# Example dump_cmake_variables("optional-search-term")
+# Example dump_cmake_variables("optional-key-search-term", "optional-value-search-term")
 #
 function(dump_cmake_variables)
     get_cmake_property(_variableNames VARIABLES)
@@ -156,15 +157,23 @@ function(dump_cmake_variables)
     foreach (_variableName ${_variableNames})
         if (ARGV0)
             unset(MATCHED)
-            string(REGEX MATCH ${ARGV0} MATCHED "${_variableName} ${${_variableName}}")
+            string(REGEX MATCH ${ARGV0} MATCHED "${_variableName}")
             if (NOT MATCHED)
-                continue()
+                if (NOT ARGV1)
+                    continue()
+                endif()
+                unset(MATCHED)
+                string(REGEX MATCH ${ARGV1} MATCHED "${${_variableName}}")
+                if (NOT MATCHED)
+                    continue()
+                endif()
             endif()
         endif()
         message(STATUS " >>>>>>> ${_variableName}=${${_variableName}}")
     endforeach()
 endfunction()
 
+dump_cmake_variables("^APP")
 
 #====================================================================
 # Info
@@ -176,13 +185,16 @@ message(STATUS "CMAKE_SOURCE_DIR         : ${CMAKE_SOURCE_DIR}")
 message(STATUS "CMAKE_BINARY_DIR         : ${CMAKE_BINARY_DIR}")
 message(STATUS "CMAKE_CURRENT_SOURCE_DIR : ${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "CMAKE_CURRENT_BINARY_DIR : ${CMAKE_CURRENT_BINARY_DIR}")
-
-execute_process(COMMAND git describe --tags --abbrev=0 OUTPUT_VARIABLE GIT_LASTTAG)
-string(STRIP "${GIT_LASTTAG}" GIT_LASTTAG)
-if("v${APPVER}" STREQUAL "${GIT_LASTTAG}")
-    message(STATUS "######################## : git tag matches version: ${GIT_LASTTAG} == ${APPVER}")
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+    execute_process(COMMAND git describe --tags --abbrev=0 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE GIT_LASTTAG)
+    string(STRIP "${GIT_LASTTAG}" GIT_LASTTAG)
+    if("v${APPVER}" STREQUAL "${GIT_LASTTAG}")
+        message(STATUS "######################## : git tag matches version: ${GIT_LASTTAG} == ${APPVER}")
+    else()
+        message(AUTHOR_WARNING "######################### : git tag does not match version: ${GIT_LASTTAG} != ${APPVER}")
+    endif()
 else()
-    message(AUTHOR_WARNING "######################### : git tag does not match version: ${GIT_LASTTAG} != ${APPVER}")
+    message(STATUS "######################## : Not in git repository")
 endif()
 message(STATUS "-------------------------------------------------------------------------")
 
@@ -221,21 +233,21 @@ if(UNIX AND NOT APPLE)
     # Check for md2man (md2man-roff ./README.md > README.1)
     if (EXISTS /usr/local/bin/md2man-roff)
         message(STATUS "Generating man page with md2man")
-        add_custom_target(man ALL /usr/local/bin/md2man-roff "${CMAKE_CURRENT_SOURCE_DIR}/README.md" > "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
+        add_custom_target(${APPNAME}-man ALL /usr/local/bin/md2man-roff "${CMAKE_CURRENT_SOURCE_DIR}/README.md" > "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
 
     # Check for ronn (ronn -r --pipe README.md > ./bld/README.1)
     elseif (EXISTS /usr/bin/ronn)
         message(STATUS "Generating man page with ronn")
-        add_custom_target(man ALL /usr/bin/ronn -r --pipe "${CMAKE_CURRENT_SOURCE_DIR}/README.md" > "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
+        add_custom_target(${APPNAME}-man ALL /usr/bin/ronn -r --pipe "${CMAKE_CURRENT_SOURCE_DIR}/README.md" > "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
 
     # Check for pandoc (pandoc README.md -t man -o README.1)
     elseif (EXISTS /usr/bin/pandoc)
         message(STATUS "Generating man page with pandoc")
-        add_custom_target(man ALL /usr/bin/pandoc "${CMAKE_CURRENT_SOURCE_DIR}/prv/install/README.md" -f markdown -t man -o "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
+        add_custom_target(${APPNAME}-man ALL /usr/bin/pandoc "${CMAKE_CURRENT_SOURCE_DIR}/prv/install/README.md" -f markdown -t man -o "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1"
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libmembus.1" DESTINATION man/man1)
 
