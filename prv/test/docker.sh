@@ -11,6 +11,7 @@ else
     exit -1
 fi
 
+
 #--------------------------------------------------------------------------------------------------
 # Functions
 
@@ -26,14 +27,11 @@ installCMake()
     mkdir -p /code/cmake
     cd /code/cmake
 
-    wget https://github.com/Kitware/CMake/releases/download/v${CMAKEVER}/cmake-${CMAKEVER}.tar.gz
-    exitOnError "Failed to download cmake version $CMAKEVER"
+    git clone https://github.com/Kitware/CMake.git ./
+    exitOnError "Failed to clone cmake"
 
-    tar xvzf ./cmake-${CMAKEVER}.tar.gz
-    exitOnError "Failed to extract cmake version $CMAKEVER"
-
-    cd cmake-${CMAKEVER}
-    exitOnError "Failed to cd cmake version $CMAKEVER"
+    git checkout $CMAKEVER
+    exitOnError "Failed to checkout tag : $CMAKEVER"
 
     ./bootstrap
     exitOnError "Failed to bootstrap cmake version $CMAKEVER"
@@ -53,7 +51,7 @@ installCMake()
 if [[ $1 == "check-cmake" ]]; then
 
     CMAKEVER=$(cmake --version)
-    echo "$CMAKEVER"
+    echo "--- $CMAKEVER"
     if compareVersion "$CMAKEVER" "$2" "<"; then
         echo "CMake version is below $2, installing $3"
         installCMake "$3"
@@ -75,8 +73,8 @@ if [[ $1 == "test-cmake" ]]; then
 
     ./clean.sh
 
-    ./add.sh cmake -y
-    exitOnError "test-cmake: Failed to add cmake to project"
+    # ./add.sh cmake -y
+    # exitOnError "test-cmake: Failed to add cmake to project"
 
     cmake . -B ./bld -G "Unix Makefiles"
     exitOnError "test-cmake: Failed to configure"
@@ -86,6 +84,8 @@ if [[ $1 == "test-cmake" ]]; then
 
     cmake --install ./bld
     exitOnError "test-cmake: Failed to install"
+
+    libmembus test
 
     libmembus uninstall
     exitOnError "test-cmake: Failed to uninstall"
@@ -154,141 +154,4 @@ if [[ $1 == "test-conan" ]]; then
     # exitOnError "test-cmake: Failed to uninstall"
 
 fi
-
-#--------------------------------------------------------------------------------------------------
-if [[ $1 == "test-gradle" ]]; then
-
-    showBanner "Gradle Test"
-
-    apt-get -yqq update
-    # apt-get -yqq install gradle
-
-    if [ ! -z $(which gradle) ]; then
-        $GRADLEVER=$(gradle --version)
-        echo "$GRADLEVER"
-    fi
-    if compareVersion "$GRADLEVER" "6.3" "<"; then
-
-        GRADLEVER="6.8"
-
-        showInfo "Installing gradle ${GRADLEVER}..."
-
-        apt-get remove gradle
-        apt-get -yqq install default-jdk
-
-        TMPDIR=$(mktemp -d -t gradle-XXXXXXXXXX)
-        cd "$TMPDIR"
-        exitOnError "Faile to create temp directory : $TMPDIR"
-
-        wget -q "https://services.gradle.org/distributions/gradle-${GRADLEVER}-bin.zip" -P "$TMPDIR"
-        exitOnError "Failed to download gradle version ${GRADLEVER}"
-
-        unzip -q -d "/opt/gradle" "$TMPDIR/gradle-${GRADLEVER}-bin.zip"
-        exitOnError "Failed to extract gradle version ${GRADLEVER}"
-
-        if [ ! -f "/opt/gradle/gradle-${GRADLEVER}/bin/gradle" ]; then
-            exitWithError "Failed to install gradle"
-        fi
-
-        export GRADLE_HOME="/opt/gradle/gradle-${GRADLEVER}"
-        export PATH="${GRADLE_HOME}/bin:${PATH}"
-
-        rm -Rf "$TMPDIR"
-
-    fi
-
-    cp -R /code/libmembus /code/libmembus-gradle
-    exitOnError "test-gradle: Failed to copy to directory : /code/libmembus-gradle"
-
-    cd /code/libmembus-gradle
-    exitOnError "test-gradle: Failed to switch to directory : /code/libmembus-gradle"
-
-    ./clean.sh
-
-    ./add.sh gradle -y
-    exitOnError "test-gradle: Failed to add gradle to project"
-
-    gradle build
-    exitOnError "test-gradle: Failed to build"
-
-fi
-
-
-#--------------------------------------------------------------------------------------------------
-if [[ $1 == "test-pip" ]]; then
-
-    showBanner "pip Test"
-
-    apt-get -yqq update
-    apt-get -yqq install python3 python3-pip
-    exitOnError "test-pip: Failed to install dependencies"
-
-    cp -R /code/libmembus /code/libmembus-pip
-    exitOnError "test-pip: Failed to copy to directory : /code/libmembus-pip"
-
-    cd /code/libmembus-pip
-    exitOnError "test-pip: Failed to switch to directory : /code/libmembus-pip"
-
-    ./clean.sh
-
-    ./add.sh pip -y
-    exitOnError "test-pip: Failed to add pip to project"
-
-    pip3 install .
-    exitOnError "test-pip: Failed to install pip module"
-
-    pip3 list
-
-    # export PYTHONPATH=${PYTHONPATH}:/usr/local/
-
-    # python3 ./src/pytest/py/test.py
-    # exitOnError "test-pip: Failed to pass test"
-
-    pip3 uninstall -y libmembus
-    exitOnError "test-pip: Failed to uninstall"
-
-fi
-
-#--------------------------------------------------------------------------------------------------
-if [[ $1 == "test-npm" ]]; then
-
-    showBanner "npm Test"
-
-    apt-get -yqq update
-    apt-get -yqq install git nodejs npm
-    exitOnError "test-npm: Failed to install dependencies"
-
-    cp -R /code/libmembus /code/libmembus-npm
-    exitOnError "test-npm: Failed to copy to directory : /code/libmembus-npm"
-
-    cd /code/libmembus-npm
-    exitOnError "test-npm: Failed to switch to directory : /code/libmembus-npm"
-
-    ./clean.sh
-
-    ./add.sh npm -y
-    exitOnError "test-npm: Failed to add npm to project"
-
-    cmake . -B ./bld
-    exitOnError "test-npm: Failed to configure"
-
-    cmake --build ./bld
-    exitOnError "test-npm: Failed to build"
-
-    npm link
-    exitOnError "test-npm: Failed to install npm module"
-
-    npm -g list
-
-    export NODE_PATH=/usr/local/lib/node_modules
-
-    node ./src/node-test/js/test.js
-    exitOnError "test-npm: Failed to pass test"
-
-    npm -g rm libmembus
-    exitOnError "test-npm: Failed to uninstall"
-
-fi
-
-
 

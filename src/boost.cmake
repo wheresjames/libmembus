@@ -16,15 +16,39 @@ else()
     find_package(Boost COMPONENTS date_time)
 endif()
 
-if(NOT Boost_FOUND)
+if(Boost_FOUND)
+
+    message(STATUS "Found Boost        : ${Boost_VERSION}")
+    message(STATUS "Boost_INCLUDE_DIRS : ${Boost_INCLUDE_DIRS}")
+    message(STATUS "Boost_LIBRARY_DIRS : ${Boost_LIBRARY_DIRS}")
+    message(STATUS "Boost_LIBRARIES    : ${Boost_LIBRARIES}")
+    include_directories("${Boost_INCLUDE_DIRS}")
+    link_directories("${Boost_LIBRARY_DIRS}")
+
+else()
     message(FATAL_ERROR "Boost not found")
+
+    # message(STATUS "Fetch boost")
+    # include(FetchContent)
+    # FetchContent_Declare(
+    #     boost
+    #     GIT_REPOSITORY      https://github.com/boostorg/boost.git
+    #     GIT_TAG             master
+    #     GIT_PROGRESS        TRUE
+    # )
+    # FetchContent_MakeAvailable(boost)
+
+    # if(NOT boost_POPULATED)
+    #     message(FATAL_ERROR "boost not found")
+    # endif()
+
+    # set(DEPENDCHAIN ${DEPENDCHAIN} boost)
+
+    # message(STATUS "Boost_SOURCE_DIR : ${boost_SOURCE_DIR}")
+    # message(STATUS "Boost_BINARY_DIR : ${boost_BINARY_DIR}")
+
+    # include_directories(${boost_SOURCE_DIR})
+    # link_directories(${boost_BINARY_DIR})
+
 endif()
-
-include_directories("${Boost_INCLUDE_DIRS}")
-link_directories("${Boost_LIBRARY_DIRS}")
-
-message(STATUS "Found Boost        : ${Boost_VERSION}")
-message(STATUS "Boost_INCLUDE_DIRS : ${Boost_INCLUDE_DIRS}")
-message(STATUS "Boost_LIBRARY_DIRS : ${Boost_LIBRARY_DIRS}")
-message(STATUS "Boost_LIBRARIES    : ${Boost_LIBRARIES}")
 

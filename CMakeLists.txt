@@ -178,7 +178,7 @@ message(STATUS "CMAKE_CURRENT_SOURCE_DIR : ${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "CMAKE_CURRENT_BINARY_DIR : ${CMAKE_CURRENT_BINARY_DIR}")
 
 execute_process(COMMAND git describe --tags --abbrev=0 OUTPUT_VARIABLE GIT_LASTTAG)
-string(STRIP ${GIT_LASTTAG} GIT_LASTTAG)
+string(STRIP "${GIT_LASTTAG}" GIT_LASTTAG)
 if("v${APPVER}" STREQUAL "${GIT_LASTTAG}")
     message(STATUS "######################## : git tag matches version: ${GIT_LASTTAG} == ${APPVER}")
 else()
@@ -190,7 +190,12 @@ message(STATUS "----------------------------------------------------------------
 #====================================================================
 # Add sub directories
 foreach(ADDDIR ${SUBDIRS})
-    add_subdirectory("${ADDDIR}")
+    if (EXISTS "${ADDDIR}/CMakeLists.txt")
+        message(STATUS "Adding directory ${ADDDIR}")
+        add_subdirectory("${ADDDIR}")
+    else()
+        message(STATUS "Ignoring directory ${ADDDIR}")
+    endif()
 endforeach()
 
 
@@ -201,7 +206,7 @@ if (DOXYGEN_FOUND)
     set(doxyfile_in ${CMAKE_CURRENT_SOURCE_DIR}/prv/dox/doxygen.cfg)
     set(doxyfile ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
     configure_file(${doxyfile_in} ${doxyfile} @ONLY)
-    add_custom_target(doc ALL
+    add_custom_target(${APPNAME}-doc ALL
         ${DOXYGEN_EXECUTABLE} ${doxyfile}
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Generating API documentation with Doxygen" VERBATIM)

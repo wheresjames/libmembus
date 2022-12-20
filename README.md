@@ -27,7 +27,7 @@
 
 #### Build and install
 
-    $ cmake . -B ./bld 
+    $ cmake . -B ./bld
     $ cmake --build ./bld -j4
     $ sudo cmake --install ./bld
 
@@ -55,7 +55,7 @@
 
 From the [Windows Powershell](https://docs.microsoft.com/en-us/powershell/)
 
-    > cmake . -B ./bld 
+    > cmake . -B ./bld
     > cmake --build ./bld -j4
 
 OR with conan
@@ -107,7 +107,7 @@ OR use FetchContent
         GIT_TAG             v0.1.3
         GIT_PROGRESS        TRUE
     )
-    FetchContent_MakeAvailable(libmembus)    
+    FetchContent_MakeAvailable(libmembus)
     include_directories(${libmembus_SOURCE_DIR}/src/main/headers)
     link_directories(${libmembus_BINARY_DIR}/lib)
 
