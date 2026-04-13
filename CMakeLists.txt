@@ -62,6 +62,8 @@ message(STATUS " [-] CMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}")
 # set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 # set(BOOST_INCLUDE_LIBRARIES "core;assert;stacktrace" CACHE STRING "" FORCE)
 
+get_latest_git_tag("https://github.com/catchorg/Catch2" "^v" LIB3_CATCH2_VERSION)
+
 dump_cmake_variables(LIB3)
 
 #-------------------------------------------------------------
