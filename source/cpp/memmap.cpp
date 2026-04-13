@@ -91,7 +91,9 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
     // Map the region
     _d->m_map.reset(new mapped_region(*_d->m_mem, read_write));
 
-    m_size = nSize;
+    // Use the actual mapped size, not the caller-supplied nSize, so that
+    // reads/writes are bounded by reality when attaching to an existing share.
+    m_size = (int64_t)_d->m_map->get_size();
     m_sName = sName;
 
     return true;
@@ -119,7 +121,7 @@ int64_t memmap::write(const std::string &sStr)
 std::string memmap::read(int64_t sz)
 {
     if (0 >= m_size)
-        return 0;
+        return std::string();
 
     char *p = data();
     if (!p)

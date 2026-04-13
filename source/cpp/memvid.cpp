@@ -19,15 +19,10 @@ memvid::vidview memvid::getBuf(int64_t idx) noexcept(false)
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
 
-    // Loop index if needed
-    if (0 > idx)
-        idx += *pBufs;
-    else if (*pBufs <= idx)
-        idx -= *pBufs;
-
-    // Ensure the index is valid
-    if (0 > idx || *pBufs <= idx)
+    // Wrap index with full modulo so any offset is valid
+    if (0 >= *pBufs)
         throw std::exception();
+    idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
     return memvid::vidview(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last,
                            *pScanWidth * *pHeight, *pScanWidth, *pWidth, *pHeight);
@@ -48,15 +43,10 @@ bool memvid::fill(int64_t idx, int col)
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
 
-    // Loop index if needed
-    if (0 > idx)
-        idx += *pBufs;
-    else if (*pBufs <= idx)
-        idx -= *pBufs;
-
-    // Ensure the index is valid
-    if (0 > idx || *pBufs <= idx)
+    // Wrap index with full modulo so any offset is valid
+    if (0 >= *pBufs)
         return false;
+    idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
     memset(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last, col, *pScanWidth * *pHeight);
 
@@ -84,48 +74,29 @@ int64_t memvid::getPtr(int64_t offset)
     int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
 
-    // Pointer value
-    int64_t ptr = *pPtr + offset;
-
-    // Loop the pointer
-    if (0 > ptr)
-        ptr += *pBufs;
-    else if (*pBufs <= ptr)
-        ptr -= *pBufs;
-
-    // Make sure the pointer is valid
-    if (0 > ptr || *pBufs <= ptr)
+    if (0 >= *pBufs)
         return -1;
 
-    return ptr;
+    // Wrap with full modulo so any offset is valid
+    return ((*pPtr + offset) % *pBufs + *pBufs) % *pBufs;
 }
 
 int64_t memvid::setPtr(int64_t ptr)
 {
-    if (0 > ptr)
-        return -1;
-
     char *p = m_mem.data();
     if (!p)
         return -1;
 
-    // Pointer pointer
     int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
 
-    // Loop the pointer
-    if (0 > ptr)
-        ptr += *pBufs;
-    else if (*pBufs <= ptr)
-        ptr -= *pBufs;
-
-    // Make sure the pointer is valid
-    if (0 > ptr || *pBufs <= ptr)
+    if (0 >= *pBufs)
         return -1;
 
-    // Set the pointer
-    *pPtr = ptr;
+    // Wrap with full modulo so any value is valid
+    ptr = ((ptr % *pBufs) + *pBufs) % *pBufs;
 
+    *pPtr = ptr;
     return ptr;
 }
 
@@ -224,13 +195,24 @@ bool memvid::open_existing(const std::string &sName)
 {
     close();
 
-    // Attempt to open existing share
     if (!m_mem.open(sName, 0, false))
         return false;
 
-    // Verify data pointer
     char *p = m_mem.data();
     if (!p)
+    {
+        close();
+        return false;
+    }
+
+    // Validate critical header fields before trusting them for pointer arithmetic
+    int64_t *pSize    = (int64_t*)(p + hv_size);
+    int64_t *pWidth   = (int64_t*)(p + hv_width);
+    int64_t *pHeight  = (int64_t*)(p + hv_height);
+    int64_t *pBufs    = (int64_t*)(p + hv_bufs);
+    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
+
+    if (0 >= *pSize || 0 >= *pWidth || 0 >= *pHeight || 0 >= *pBufs || 0 >= *pBlockSz)
     {
         close();
         return false;

@@ -74,6 +74,23 @@ TEST_CASE("MemMap", "[memmap]")
         std::string back = r.read();
         REQUIRE(back.size() == 16);
     }
+
+    SECTION("read() on unopened map returns empty string")
+    {
+        mmb::memmap m;
+        REQUIRE(m.read().empty());
+        REQUIRE(m.read(10).empty());
+    }
+
+    SECTION("Attaching with nSize=0 reports the creator's actual size")
+    {
+        mmb::memmap creator, attacher;
+        REQUIRE(creator.open("/test_memmap_actualsize", 256, true, true));
+        REQUIRE(creator.size() == 256);
+
+        REQUIRE(attacher.open("/test_memmap_actualsize", 0, false, false));
+        REQUIRE(attacher.size() == 256);
+    }
 }
 
 
@@ -270,6 +287,27 @@ TEST_CASE("MemVid", "[memvid]")
         REQUIRE(vid.next(2)   == 0);  // wraps at 4
     }
 
+    SECTION("Pointer arithmetic wraps correctly for multi-step offsets")
+    {
+        mmb::memvid vid;
+        REQUIRE(vid.open("/memvid_multiwrap", true, 16, 8, 24, 30, 4));
+        REQUIRE(vid.setPtr(0) == 0);
+
+        // getPtr: offsets beyond bufs
+        REQUIRE(vid.getPtr(4)  == 0);  // full lap lands on 0
+        REQUIRE(vid.getPtr(5)  == 1);  // one past a full lap
+        REQUIRE(vid.getPtr(8)  == 0);  // two full laps
+        REQUIRE(vid.getPtr(-5) == 3);  // negative multi-step
+
+        // setPtr: values >= bufs or negative
+        REQUIRE(vid.setPtr(5)  == 1);  // 5 % 4 == 1
+        REQUIRE(vid.setPtr(-1) == 3);  // wraps to 3
+
+        // getBuf: old code threw for idx >= 2*bufs; new code wraps
+        REQUIRE_NOTHROW(vid.getBuf(8));   // 8 % 4 == 0
+        REQUIRE_NOTHROW(vid.getBuf(-5));  // wraps to 3
+    }
+
     SECTION("getPtrErr: circular distance from ptr+bias to pos")
     {
         mmb::memvid vid;
@@ -285,6 +323,17 @@ TEST_CASE("MemVid", "[memvid]")
         REQUIRE(creator.open("/memvid_existing", true, 16, 8, 24, 30, 2));
         REQUIRE(ex.open_existing("/memvid_existing"));
         REQUIRE(ex.isOpen());
+    }
+
+    SECTION("open_existing rejects share with zeroed headers")
+    {
+        // A raw memmap share has all-zero bytes — header fields (bufs, blocksz,
+        // etc.) are 0, which open_existing must reject.
+        mmb::memmap raw;
+        REQUIRE(raw.open("/memvid_zerohdr", 256, true, true));
+
+        mmb::memvid vid;
+        REQUIRE_FALSE(vid.open_existing("/memvid_zerohdr"));
     }
 }
 
@@ -384,6 +433,27 @@ TEST_CASE("MemAud", "[memaud]")
         REQUIRE(aud.next(2)   == 0);
     }
 
+    SECTION("Pointer arithmetic wraps correctly for multi-step offsets")
+    {
+        mmb::memaud aud;
+        REQUIRE(aud.open("/memaud_multiwrap", true, 1, 8, 8000, 100, 4));
+        REQUIRE(aud.setPtr(0) == 0);
+
+        // getPtr: offsets beyond bufs
+        REQUIRE(aud.getPtr(4)  == 0);  // full lap lands on 0
+        REQUIRE(aud.getPtr(5)  == 1);  // one past a full lap
+        REQUIRE(aud.getPtr(8)  == 0);  // two full laps
+        REQUIRE(aud.getPtr(-5) == 3);  // negative multi-step
+
+        // setPtr: values >= bufs or negative
+        REQUIRE(aud.setPtr(5)  == 1);  // 5 % 4 == 1
+        REQUIRE(aud.setPtr(-1) == 3);  // wraps to 3
+
+        // getBuf: old code threw for idx >= 2*bufs; new code wraps
+        REQUIRE_NOTHROW(aud.getBuf(8));   // 8 % 4 == 0
+        REQUIRE_NOTHROW(aud.getBuf(-5));  // wraps to 3
+    }
+
     SECTION("getPtrErr: circular distance")
     {
         mmb::memaud aud;
@@ -399,5 +469,14 @@ TEST_CASE("MemAud", "[memaud]")
         REQUIRE(creator.open("/memaud_existing", true, 1, 8, 8000, 100, 2));
         REQUIRE(ex.open_existing("/memaud_existing"));
         REQUIRE(ex.isOpen());
+    }
+
+    SECTION("open_existing rejects share with zeroed headers")
+    {
+        mmb::memmap raw;
+        REQUIRE(raw.open("/memaud_zerohdr", 256, true, true));
+
+        mmb::memaud aud;
+        REQUIRE_FALSE(aud.open_existing("/memaud_zerohdr"));
     }
 }

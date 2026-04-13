@@ -98,7 +98,7 @@ bool memmsg::write(const std::string &sMsg)
     char *p = m_mem.data();
     if (!p)
     {   std::cout << "Invalid buffer" << std::endl;
-        false;
+        return false;
     }
 
     // Buf params
@@ -159,6 +159,12 @@ std::string memmsg::read(uint64_t wait)
     int64_t *pSize = (int64_t*)(p + hv_size);
     int64_t *pWrite = (int64_t*)(p + hv_write);
     char *pBuf = (p + hv_last);
+    interprocess_mutex *pMutex = (interprocess_mutex*)(p + hv_mutex);
+    interprocess_condition *pCond = (interprocess_condition*)(p + hv_cond);
+
+    // Hold the lock for the entire read so the writer cannot wrap the buffer
+    // underneath us while we are inspecting or copying data.
+    scoped_lock<interprocess_mutex> lk(*pMutex);
 
     // Validate read pointer
     if (0 > m_nRead || *pSize <= m_nRead)
@@ -166,29 +172,23 @@ std::string memmsg::read(uint64_t wait)
         m_nRead = 0;
     }
 
-    // Is there any unread data?
+    // Wait for data if the buffer is empty
     if (m_nRead == *pWrite)
     {
         if (0 >= wait)
             return std::string();
 
-        // Get sync objects
-        interprocess_mutex *pMutex = (interprocess_mutex*)(p + hv_mutex);
-        interprocess_condition *pCond = (interprocess_condition*)(p + hv_cond);
-        scoped_lock<interprocess_mutex> lk(*pMutex);
+        if (!pCond->timed_wait(lk, boost::get_system_time() + boost::posix_time::milliseconds(wait)))
+            return std::string();
 
         if (m_nRead == *pWrite)
-            if (!pCond->timed_wait(lk, boost::get_system_time() + boost::posix_time::milliseconds(wait)))
-                return std::string();
+            return std::string();
     }
 
     // Validate length
     int64_t len = *(int64_t*)(pBuf + m_nRead);
     if (0 >= len || (m_nRead + len) > *pSize)
     {
-        // std::cout << "Looping read pointer : " << m_nRead << " : " << len << " : " << *pSize << " : " << *pWrite << std::endl;
-        // fflush(stdout);
-
         m_nRead = 0;
 
         // Anything after looping?
