@@ -1,6 +1,6 @@
 name            libmembus
-version         0.1.7
-description     C++ Shared memory library
+version         0.1.0
+description     Shared memory data bus
 company         wheresjames
 author          Robert Umbehant
 email           libmembus@wheresjames.com
