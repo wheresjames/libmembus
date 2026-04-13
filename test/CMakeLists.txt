@@ -27,7 +27,6 @@ target_precompile_headers(${BINARY} PUBLIC ${CMAKE_SOURCE_DIR}/include/libmembus
 target_link_libraries(${BINARY} PRIVATE ${PROJECT_NAME} Catch2::Catch2WithMain)
 
 # Register tests with CTest via Catch2 discovery
-enable_testing()
 catch_discover_tests(${BINARY})
 
 # Auto-run tests after each build

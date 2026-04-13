@@ -66,9 +66,15 @@ get_latest_git_tag("https://github.com/catchorg/Catch2" "^v" LIB3_CATCH2_VERSION
 
 dump_cmake_variables(LIB3)
 
+
 #-------------------------------------------------------------
 # Add code
 add_subdirectory(source)
+
+
+#-------------------------------------------------------------
+# Add tests
+enable_testing()
 add_subdirectory(test)
 
 
