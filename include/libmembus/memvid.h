@@ -94,23 +94,26 @@ public:
     {
         hv_size         = 0,
         hv_ptr          = 1 * sizeof(int64_t),
-        hv_width        = 2 * sizeof(int64_t),
-        hv_height       = 3 * sizeof(int64_t),
-        hv_scanwidth    = 4 * sizeof(int64_t),
-        hv_bpp          = 5 * sizeof(int64_t),
-        hv_fps          = 6 * sizeof(int64_t),
-        hv_bufs         = 7 * sizeof(int64_t),
-        hv_blocksz      = 8 * sizeof(int64_t),
-        hv_last         = 9 * sizeof(int64_t)
+        hv_seq          = 2 * sizeof(int64_t),   // monotonic write-sequence counter
+        hv_id           = 3 * sizeof(int64_t),   // random session ID, changes on every open(bCreate=true)
+        hv_width        = 4 * sizeof(int64_t),
+        hv_height       = 5 * sizeof(int64_t),
+        hv_scanwidth    = 6 * sizeof(int64_t),
+        hv_bpp          = 7 * sizeof(int64_t),
+        hv_fps          = 8 * sizeof(int64_t),
+        hv_bufs         = 9 * sizeof(int64_t),
+        hv_blocksz      = 10 * sizeof(int64_t),
+        hv_last         = 11 * sizeof(int64_t)
     };
 
-    /// Frame header
+    /// Frame header: [size][vpts][apts][seq][pixel data...]
     enum FrameHeaderVal
     {
         fv_size         = 0,
         fv_vpts         = 1 * sizeof(int64_t),
         fv_apts         = 2 * sizeof(int64_t),
-        fv_last         = 3 * sizeof(int64_t)
+        fv_seq          = 3 * sizeof(int64_t),   // sequence number stamped by next()
+        fv_last         = 4 * sizeof(int64_t)
     };
 
 public:
@@ -170,6 +173,35 @@ public:
 
     /// Image fps
     int64_t getFps();
+
+    /** Returns the session ID written when the share was created.
+        Readers should save this on open and compare periodically.  A change means
+        the writer restarted and the reader must close() and reopen.
+    */
+    int64_t getSessionId();
+
+    /** Returns the global write-sequence counter (incremented by every next() call).
+
+        Readers use this together with the sequence number of the last frame they
+        processed (rLastSeq) to measure lag and detect overrun:
+
+          int64_t lag    = vid.getSeq() - rLastSeq;
+          bool    lapped = lag >= vid.getBufs();
+
+        A lag of zero means the reader is up to date.  A lag >= getBufs() means the
+        writer has advanced a full ring past the reader's last position: the slot the
+        reader would read next has been (or is about to be) overwritten.
+    */
+    int64_t getSeq();
+
+    /** Returns the sequence number most recently stamped into slot @p idx by next().
+        A value of 0 means the slot has never been written.
+
+        Use to verify a slot holds the expected frame before reading it:
+          bool ready   = vid.getFrameSeq(rPos) > rLastSeq;      // new data available
+          bool in_sync = vid.getFrameSeq(rPos) == rLastSeq + 1; // no frames skipped
+    */
+    int64_t getFrameSeq(int64_t idx);
 
 private:
 

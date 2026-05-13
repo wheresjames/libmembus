@@ -23,6 +23,7 @@ namespace LIBMEMBUS_NS
 #include <string>
 #include <iostream>
 #include <atomic>
+#include <random>
 // #include <mutex>
 // #include <condition_variable>
 
@@ -31,5 +32,7 @@ namespace LIBMEMBUS_NS
 #include "libmembus/memmsg.h"
 #include "libmembus/memvid.h"
 #include "libmembus/memaud.h"
+#include "libmembus/memcmd.h"
+#include "libmembus/memkv.h"
 
 

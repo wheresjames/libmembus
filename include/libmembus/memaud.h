@@ -88,20 +88,23 @@ public:
     {
         hv_size         = 0,
         hv_ptr          = 1 * sizeof(int64_t),
-        hv_ch           = 2 * sizeof(int64_t),
-        hv_bps          = 3 * sizeof(int64_t),
-        hv_bitrate      = 4 * sizeof(int64_t),
-        hv_fps          = 5 * sizeof(int64_t),
-        hv_bufs         = 6 * sizeof(int64_t),
-        hv_blocksz      = 7 * sizeof(int64_t),
-        hv_last         = 8 * sizeof(int64_t)
+        hv_seq          = 2 * sizeof(int64_t),   // monotonic write-sequence counter
+        hv_id           = 3 * sizeof(int64_t),   // random session ID, changes on every open(bCreate=true)
+        hv_ch           = 4 * sizeof(int64_t),
+        hv_bps          = 5 * sizeof(int64_t),
+        hv_bitrate      = 6 * sizeof(int64_t),
+        hv_fps          = 7 * sizeof(int64_t),
+        hv_bufs         = 8 * sizeof(int64_t),
+        hv_blocksz      = 9 * sizeof(int64_t),
+        hv_last         = 10 * sizeof(int64_t)
     };
 
-    /// Frame header
+    /// Frame header: [size][seq][sample data...]
     enum FrameHeaderVal
     {
         fv_size         = 0,
-        fv_last         = 1 * sizeof(int64_t)
+        fv_seq          = 1 * sizeof(int64_t),   // sequence number stamped by next()
+        fv_last         = 2 * sizeof(int64_t)
     };
 
 public:
@@ -162,6 +165,34 @@ public:
 
     /// Size of a single buffer
     int64_t getBufSize();
+
+    /** Returns the session ID written when the share was created.
+        Readers should save this on open and compare periodically.  A change means
+        the writer restarted and the reader must close() and reopen.
+    */
+    int64_t getSessionId();
+
+    /** Returns the global write-sequence counter (incremented by every next() call).
+
+        Readers use this together with the sequence number of the last buffer they
+        processed (rLastSeq) to measure lag and detect overrun:
+
+          int64_t lag    = aud.getSeq() - rLastSeq;
+          bool    lapped = lag >= aud.getBufs();
+
+        A lag of zero means the reader is up to date.  A lag >= getBufs() means the
+        writer has advanced a full ring past the reader's last position.
+    */
+    int64_t getSeq();
+
+    /** Returns the sequence number most recently stamped into slot @p idx by next().
+        A value of 0 means the slot has never been written.
+
+        Use to verify a slot holds the expected buffer before reading it:
+          bool ready   = aud.getFrameSeq(rPos) > rLastSeq;      // new data available
+          bool in_sync = aud.getFrameSeq(rPos) == rLastSeq + 1; // no buffers skipped
+    */
+    int64_t getFrameSeq(int64_t idx);
 
 private:
 

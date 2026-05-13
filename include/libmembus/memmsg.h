@@ -38,7 +38,7 @@ class memmsg
 public:
 
     /// Constructor
-    memmsg() : m_bWrite(false), m_nRead(0) {};
+    memmsg() : m_bWrite(false), m_nRead(0), m_nLastSeq(-1) {};
 
     /// Destructor
     virtual ~memmsg() { close(); }
@@ -68,11 +68,15 @@ public:
     bool write(const std::string &sMsg);
 
     /** Read a message from the buffer
-        @param [in] wait    - Maximum number of milliseconds to wait for a message to appear.
+        @param [in]  wait      - Maximum number of milliseconds to wait for a message.
+        @param [out] pOverrun  - If non-null, set to true when one or more messages were
+                                 skipped because the writer lapped this reader.  m_nRead is
+                                 resynced to the current write position; call read() again to
+                                 receive the next message written after the resync.
 
-        @returns Message that was read or an empty string if function timed out waiting for a message.
+        @returns Message that was read, or an empty string on timeout or overrun.
     */
-    std::string read(uint64_t wait);
+    std::string read(uint64_t wait, bool *pOverrun = nullptr);
 
     /** Returns true if memory already existed
         @returns Non-zero if memory share already existed.
@@ -89,6 +93,9 @@ private:
 
     /// Read pointer
     int64_t     m_nRead;
+
+    /// Sequence number of the last message successfully read; -1 if none yet
+    int64_t     m_nLastSeq;
 
 };
 

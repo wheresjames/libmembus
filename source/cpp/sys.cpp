@@ -16,13 +16,25 @@ namespace LIBMEMBUS_NS
 static volatile int *g_fCount = 0;
 static void ctrl_c_handler(int /*s*/)
 {
+    static const char msg[] = "~ ctrl-c ~\n";
+#if defined(LIBMEMBUS_POSIX)
+    // Only async-signal-safe calls allowed here
     if (!g_fCount || 3 < (*g_fCount))
-    {   std::cout << "~ ctrl-c ~\n";
+    {
+        write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+        _exit(1);
+    }
+    __atomic_fetch_add((int*)g_fCount, 1, __ATOMIC_SEQ_CST);
+    write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+#else
+    // Windows CtrlHandler runs in a dedicated thread, not a true async signal
+    if (!g_fCount || 3 < (*g_fCount))
+    {   std::cout << msg;
         exit(1);
     }
-
     *g_fCount = *g_fCount + 1;
-    std::cout << "~ ctrl-c ~\n";
+    std::cout << msg;
+#endif
 }
 
 

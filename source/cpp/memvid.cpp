@@ -70,15 +70,12 @@ int64_t memvid::getPtr(int64_t offset)
     if (!p)
         return -1;
 
-    // Pointer pointer
-    int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
-
     if (0 >= *pBufs)
         return -1;
 
-    // Wrap with full modulo so any offset is valid
-    return ((*pPtr + offset) % *pBufs + *pBufs) % *pBufs;
+    int64_t cur = std::atomic_ref<int64_t>(*(int64_t*)(p + hv_ptr)).load(std::memory_order_acquire);
+    return ((cur + offset) % *pBufs + *pBufs) % *pBufs;
 }
 
 int64_t memvid::setPtr(int64_t ptr)
@@ -87,16 +84,12 @@ int64_t memvid::setPtr(int64_t ptr)
     if (!p)
         return -1;
 
-    int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
-
     if (0 >= *pBufs)
         return -1;
 
-    // Wrap with full modulo so any value is valid
     ptr = ((ptr % *pBufs) + *pBufs) % *pBufs;
-
-    *pPtr = ptr;
+    std::atomic_ref<int64_t>(*(int64_t*)(p + hv_ptr)).store(ptr, std::memory_order_release);
     return ptr;
 }
 
@@ -106,7 +99,56 @@ int64_t memvid::next(int64_t inc)
     if (!p)
         return -1;
 
-    return setPtr(*(int64_t*)(p + hv_ptr) + inc);
+    int64_t *pBufs    = (int64_t*)(p + hv_bufs);
+    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
+
+    int64_t cur = std::atomic_ref<int64_t>(*(int64_t*)(p + hv_ptr)).load(std::memory_order_acquire);
+
+    // Stamp the frame being published with the next sequence number before
+    // advancing the pointer.  Readers compare frame_seq to getSeq() to detect
+    // overrun: lapped = (getSeq() - getFrameSeq(rPos)) >= getBufs().
+    if (0 < *pBufs && 0 < *pBlockSz)
+    {
+        int64_t seq = std::atomic_ref<int64_t>(*(int64_t*)(p + hv_seq))
+                          .fetch_add(1, std::memory_order_relaxed) + 1;
+        auto *pFrameSeq = (int64_t*)(p + hv_last + (cur * *pBlockSz) + fv_seq);
+        std::atomic_ref<int64_t>(*pFrameSeq).store(seq, std::memory_order_release);
+    }
+
+    return setPtr(cur + inc);
+}
+
+int64_t memvid::getSessionId()
+{
+    char *p = m_mem.data();
+    if (!p)
+        return 0;
+    return *(int64_t*)(p + hv_id);
+}
+
+int64_t memvid::getSeq()
+{
+    char *p = m_mem.data();
+    if (!p)
+        return -1;
+    return std::atomic_ref<int64_t>(*(int64_t*)(p + hv_seq)).load(std::memory_order_acquire);
+}
+
+int64_t memvid::getFrameSeq(int64_t idx)
+{
+    char *p = m_mem.data();
+    if (!p)
+        return -1;
+
+    int64_t *pBufs    = (int64_t*)(p + hv_bufs);
+    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
+    if (0 >= *pBufs || 0 >= *pBlockSz)
+        return -1;
+
+    idx = ((idx % *pBufs) + *pBufs) % *pBufs;
+    return std::atomic_ref<int64_t>(
+               *(int64_t*)(p + hv_last + (idx * *pBlockSz) + fv_seq))
+               .load(std::memory_order_acquire);
 }
 
 int64_t memvid::getPtrErr(int64_t pos, int64_t bias)
@@ -115,22 +157,15 @@ int64_t memvid::getPtrErr(int64_t pos, int64_t bias)
     if (!p)
         return 0;
 
-    // Pointer pointer
-    int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
+    if (0 >= *pBufs)
+        return 0;
 
-    // Loop pointer
-    int64_t ptr = *pPtr + bias;
-    if (0 > ptr)
-        ptr += *pBufs;
-    else if (*pBufs <= ptr)
-        ptr -= *pBufs;
+    int64_t cur = std::atomic_ref<int64_t>(*(int64_t*)(p + hv_ptr)).load(std::memory_order_acquire);
 
-    // Loop position
-    if (0 > pos)
-        pos += *pBufs;
-    else if (*pBufs <= pos)
-        pos -= *pBufs;
+    // Wrap both values with full modulo to handle any magnitude of offset
+    int64_t ptr = ((cur + bias) % *pBufs + *pBufs) % *pBufs;
+    pos = ((pos % *pBufs) + *pBufs) % *pBufs;
 
     // Calculate error
     int64_t err = 0;
@@ -268,6 +303,8 @@ bool memvid::open(const std::string &sName, bool bCreate, int64_t w, int64_t h,
     {
         *pSize = total;
         *pPtr = 0;
+        *(int64_t*)(p + hv_seq) = 0;
+        *(int64_t*)(p + hv_id)  = (int64_t)std::mt19937_64(std::random_device{}())();
         *pWidth = w;
         *pHeight = h;
         *pScanWidth = sw;
