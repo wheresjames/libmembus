@@ -5,7 +5,7 @@
 int main()
 {
     mmb::memvid_writer writer;
-    if (!writer.open("/libmembus_example_vid", 64, 48, 30, 3))
+    if (!writer.open("/libmembus_example_vid", 64, 48, mmb::video_format::rgb24, 30, 3))
         return 1;
 
     mmb::memvid_reader reader;

@@ -265,30 +265,55 @@ TEST_CASE("MemVid", "[memvid]")
     SECTION("Invalid parameter rejection")
     {
         mmb::memvid v;
-        REQUIRE_FALSE(v.open("/memvid_bad", true,  0,  0, 24, 30, 3));  // zero w/h
-        REQUIRE_FALSE(v.open("/memvid_bad", true, 64, 48,  8, 30, 3));  // bpp != 24
-        REQUIRE_FALSE(v.open("/memvid_bad", true, 64, 48, 24,  0, 3));  // zero fps
-        REQUIRE_FALSE(v.open("/memvid_bad", true, 64, 48, 24, 30, 0));  // zero bufs
+        REQUIRE_FALSE(v.open("/memvid_bad", true,  0,  0, mmb::video_format::rgb24, 30, 3));  // zero w/h
+        REQUIRE_FALSE(v.open("/memvid_bad", true, 64, 48, (mmb::video_format)0, 30, 3));  // invalid format
+        REQUIRE_FALSE(v.open("/memvid_bad", true, 64, 48, mmb::video_format::rgb24,  0, 3));  // zero fps
+        REQUIRE_FALSE(v.open("/memvid_bad", true, 64, 48, mmb::video_format::rgb24, 30, 0));  // zero bufs
+        REQUIRE_FALSE(v.open("/memvid_bad", true, 63, 48, mmb::video_format::yuyv422, 30, 3));  // 422 requires even width
     }
 
     SECTION("Create and verify metadata")
     {
         mmb::memvid vid;
-        REQUIRE(vid.open("/memvid_meta", true, 64, 48, 24, 30, 4));
+        REQUIRE(vid.open("/memvid_meta", true, 64, 48, mmb::video_format::rgb24, 30, 4));
         REQUIRE_FALSE(vid.existing());
         REQUIRE(vid.isOpen());
         REQUIRE(vid.getWidth()  == 64);
         REQUIRE(vid.getHeight() == 48);
-        REQUIRE(vid.getBpp()    == 24);
+        REQUIRE(vid.getFormat() == mmb::video_format::rgb24);
+        REQUIRE(std::string(vid.getFormatName()) == "RGB24");
         REQUIRE(vid.getFps()    == 30);
         REQUIRE(vid.getBufs()   == 4);
+    }
+
+    SECTION("Supported packed formats compute expected scan widths")
+    {
+        struct format_case { const char *name; mmb::video_format fmt; int64_t bytes; };
+        format_case cases[] = {
+            {"/memvid_fmt_gray8",   mmb::video_format::gray8,   1},
+            {"/memvid_fmt_bgr24",   mmb::video_format::bgr24,   3},
+            {"/memvid_fmt_rgba32",  mmb::video_format::rgba32,  4},
+            {"/memvid_fmt_bgra32",  mmb::video_format::bgra32,  4},
+            {"/memvid_fmt_yuyv422", mmb::video_format::yuyv422, 2},
+            {"/memvid_fmt_uyvy422", mmb::video_format::uyvy422, 2},
+        };
+
+        for (const format_case &c : cases)
+        {
+            mmb::memvid vid;
+            REQUIRE(vid.open(c.name, true, 16, 8, c.fmt, 30, 2));
+            REQUIRE(vid.getFormat() == c.fmt);
+            REQUIRE(vid.getBuf(0).m_sw == 16 * c.bytes);
+            REQUIRE(vid.getBuf(0).m_size == 16 * 8 * c.bytes);
+            REQUIRE(vid.getBuf(0).m_format == c.fmt);
+        }
     }
 
     SECTION("Attach to existing share and verify metadata")
     {
         mmb::memvid creator, attacher;
-        REQUIRE(creator.open("/memvid_attach", true, 32, 24, 24, 25, 2));
-        REQUIRE(attacher.open("/memvid_attach", false, 32, 24, 24, 25, 2));
+        REQUIRE(creator.open("/memvid_attach", true, 32, 24, mmb::video_format::rgb24, 25, 2));
+        REQUIRE(attacher.open("/memvid_attach", false, 32, 24, mmb::video_format::rgb24, 25, 2));
         REQUIRE(attacher.existing());
         REQUIRE(attacher.getWidth()  == 32);
         REQUIRE(attacher.getHeight() == 24);
@@ -298,14 +323,14 @@ TEST_CASE("MemVid", "[memvid]")
     SECTION("Mismatched parameters on attach must fail")
     {
         mmb::memvid creator, bad;
-        REQUIRE(creator.open("/memvid_mismatch", true, 32, 24, 24, 25, 2));
-        REQUIRE_FALSE(bad.open("/memvid_mismatch", false, 64, 24, 24, 25, 2));
+        REQUIRE(creator.open("/memvid_mismatch", true, 32, 24, mmb::video_format::rgb24, 25, 2));
+        REQUIRE_FALSE(bad.open("/memvid_mismatch", false, 64, 24, mmb::video_format::rgb24, 25, 2));
     }
 
     SECTION("fill() and getBuf() data round-trip")
     {
         mmb::memvid vid;
-        REQUIRE(vid.open("/memvid_fill", true, 16, 8, 24, 30, 3));
+        REQUIRE(vid.open("/memvid_fill", true, 16, 8, mmb::video_format::rgb24, 30, 3));
 
         REQUIRE(vid.fill(0, 0xAB));
         mmb::memvid::vidview view = vid.getBuf(0);
@@ -334,7 +359,7 @@ TEST_CASE("MemVid", "[memvid]")
     SECTION("Pointer arithmetic: setPtr / getPtr / next")
     {
         mmb::memvid vid;
-        REQUIRE(vid.open("/memvid_ptr", true, 16, 8, 24, 30, 4));
+        REQUIRE(vid.open("/memvid_ptr", true, 16, 8, mmb::video_format::rgb24, 30, 4));
 
         REQUIRE(vid.setPtr(0) == 0);
         REQUIRE(vid.getPtr(0) == 0);
@@ -353,7 +378,7 @@ TEST_CASE("MemVid", "[memvid]")
     SECTION("Pointer arithmetic wraps correctly for multi-step offsets")
     {
         mmb::memvid vid;
-        REQUIRE(vid.open("/memvid_multiwrap", true, 16, 8, 24, 30, 4));
+        REQUIRE(vid.open("/memvid_multiwrap", true, 16, 8, mmb::video_format::rgb24, 30, 4));
         REQUIRE(vid.setPtr(0) == 0);
 
         // getPtr: offsets beyond bufs
@@ -374,7 +399,7 @@ TEST_CASE("MemVid", "[memvid]")
     SECTION("getPtrErr: circular distance from ptr+bias to pos")
     {
         mmb::memvid vid;
-        REQUIRE(vid.open("/memvid_ptrerr", true, 16, 8, 24, 30, 8));
+        REQUIRE(vid.open("/memvid_ptrerr", true, 16, 8, mmb::video_format::rgb24, 30, 8));
         REQUIRE(vid.setPtr(4) == 4);
         REQUIRE(vid.getPtrErr(4, 0) == 0);
         REQUIRE(vid.getPtrErr(5, 1) == 0);
@@ -383,7 +408,7 @@ TEST_CASE("MemVid", "[memvid]")
     SECTION("open_existing")
     {
         mmb::memvid creator, ex;
-        REQUIRE(creator.open("/memvid_existing", true, 16, 8, 24, 30, 2));
+        REQUIRE(creator.open("/memvid_existing", true, 16, 8, mmb::video_format::rgb24, 30, 2));
         REQUIRE(ex.open_existing("/memvid_existing"));
         REQUIRE(ex.isOpen());
     }
@@ -410,7 +435,7 @@ TEST_CASE("MemVid", "[memvid]")
         *(int64_t*)(p + mmb::memvid::hv_width)     = 64;
         *(int64_t*)(p + mmb::memvid::hv_height)    = 64;
         *(int64_t*)(p + mmb::memvid::hv_scanwidth) = 192;
-        *(int64_t*)(p + mmb::memvid::hv_bpp)       = 24;
+        *(int64_t*)(p + mmb::memvid::hv_format)    = (int64_t)mmb::video_format::rgb24;
         *(int64_t*)(p + mmb::memvid::hv_fps)       = 30;
         *(int64_t*)(p + mmb::memvid::hv_bufs)      = 2;
         *(int64_t*)(p + mmb::memvid::hv_blocksz)   = mmb::memvid::fv_last + (192 * 64);
@@ -422,7 +447,7 @@ TEST_CASE("MemVid", "[memvid]")
     SECTION("Sequence counter starts at zero and advances with next()")
     {
         mmb::memvid vid;
-        REQUIRE(vid.open("/memvid_seq", true, 16, 8, 24, 30, 4));
+        REQUIRE(vid.open("/memvid_seq", true, 16, 8, mmb::video_format::rgb24, 30, 4));
 
         REQUIRE(vid.getSeq() == 0);
         vid.next(1);
@@ -442,7 +467,7 @@ TEST_CASE("MemVid", "[memvid]")
         // 4-slot ring buffer.  The reader is lapped when the writer is a full ring
         // ahead of the reader's last processed sequence number.
         mmb::memvid vid;
-        REQUIRE(vid.open("/memvid_overrun", true, 16, 8, 24, 30, 4));
+        REQUIRE(vid.open("/memvid_overrun", true, 16, 8, mmb::video_format::rgb24, 30, 4));
 
         // Writer publishes slot 0; reader records it
         vid.next(1);                             // publishes slot 0, ptr -> 1
@@ -484,43 +509,67 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("Invalid parameter rejection")
     {
         mmb::memaud a;
-        REQUIRE_FALSE(a.open("/memaud_bad", true,  0, 16, 44100, 30, 3)); // zero channels
-        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, 12, 44100, 30, 3)); // bps not 8 or 16
-        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, 16,     0, 30, 3)); // zero bitrate
-        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, 16, 44100,  0, 3)); // zero fps
-        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, 16, 44100, 30, 0)); // zero bufs
+        REQUIRE_FALSE(a.open("/memaud_bad", true,  0, mmb::audio_format::s16le, 44100, 30, 3)); // zero channels
+        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, (mmb::audio_format)0,     44100, 30, 3)); // invalid format
+        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, mmb::audio_format::s16le,     0, 30, 3)); // zero sample rate
+        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, mmb::audio_format::s16le, 44100,  0, 3)); // zero fps
+        REQUIRE_FALSE(a.open("/memaud_bad", true,  2, mmb::audio_format::s16le, 44100, 30, 0)); // zero bufs
     }
 
-    SECTION("Create with 8-bit and verify metadata")
+    SECTION("Create with U8 and verify metadata")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_8bit", true, 1, 8, 8000, 100, 4));
+        REQUIRE(aud.open("/memaud_8bit", true, 1, mmb::audio_format::u8, 8000, 100, 4));
         REQUIRE_FALSE(aud.existing());
         REQUIRE(aud.isOpen());
         REQUIRE(aud.getChannels() == 1);
-        REQUIRE(aud.getBps()      == 8);
-        REQUIRE(aud.getBitRate()  == 8000);
+        REQUIRE(aud.getFormat()   == mmb::audio_format::u8);
+        REQUIRE(std::string(aud.getFormatName()) == "U8");
+        REQUIRE(aud.getBytesPerSample() == 1);
+        REQUIRE(aud.getSampleRate() == 8000);
         REQUIRE(aud.getFps()      == 100);
         REQUIRE(aud.getBufs()     == 4);
     }
 
-    SECTION("Create with 16-bit stereo and verify metadata")
+    SECTION("Create with S16LE stereo and verify metadata")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_16bit", true, 2, 16, 44100, 30, 3));
+        REQUIRE(aud.open("/memaud_16bit", true, 2, mmb::audio_format::s16le, 44100, 30, 3));
         REQUIRE(aud.getChannels() == 2);
-        REQUIRE(aud.getBps()      == 16);
-        REQUIRE(aud.getBitRate()  == 44100);
+        REQUIRE(aud.getFormat()   == mmb::audio_format::s16le);
+        REQUIRE(std::string(aud.getFormatName()) == "S16LE");
+        REQUIRE(aud.getBytesPerSample() == 2);
+        REQUIRE(aud.getSampleRate() == 44100);
         REQUIRE(aud.getFps()      == 30);
         REQUIRE(aud.getBufs()     == 3);
         REQUIRE(aud.getBufSize()  > 0);
     }
 
+    SECTION("Supported sample formats compute expected buffer sizes")
+    {
+        struct sample_case { const char *name; mmb::audio_format fmt; int64_t bytes; };
+        sample_case cases[] = {
+            {"/memaud_fmt_u8",    mmb::audio_format::u8,    1},
+            {"/memaud_fmt_s24le", mmb::audio_format::s24le, 3},
+            {"/memaud_fmt_f32le", mmb::audio_format::f32le, 4},
+            {"/memaud_fmt_f64le", mmb::audio_format::f64le, 8},
+        };
+
+        for (const sample_case &c : cases)
+        {
+            mmb::memaud aud;
+            REQUIRE(aud.open(c.name, true, 2, c.fmt, 1000, 100, 2));
+            REQUIRE(aud.getBytesPerSample() == c.bytes);
+            REQUIRE(aud.getBufSize() == 10 * 2 * c.bytes);
+            REQUIRE(aud.getBuf(0).m_format == c.fmt);
+        }
+    }
+
     SECTION("Attach and verify parameters match")
     {
         mmb::memaud creator, attacher;
-        REQUIRE(creator.open("/memaud_attach", true, 1, 16, 16000, 50, 2));
-        REQUIRE(attacher.open("/memaud_attach", false, 1, 16, 16000, 50, 2));
+        REQUIRE(creator.open("/memaud_attach", true, 1, mmb::audio_format::s16le, 16000, 50, 2));
+        REQUIRE(attacher.open("/memaud_attach", false, 1, mmb::audio_format::s16le, 16000, 50, 2));
         REQUIRE(attacher.existing());
         REQUIRE(attacher.getChannels() == 1);
         REQUIRE(attacher.getBufs()     == 2);
@@ -529,14 +578,14 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("Mismatched parameters on attach must fail")
     {
         mmb::memaud creator, bad;
-        REQUIRE(creator.open("/memaud_mismatch", true, 1, 16, 16000, 50, 2));
-        REQUIRE_FALSE(bad.open("/memaud_mismatch", false, 2, 16, 16000, 50, 2));
+        REQUIRE(creator.open("/memaud_mismatch", true, 1, mmb::audio_format::s16le, 16000, 50, 2));
+        REQUIRE_FALSE(bad.open("/memaud_mismatch", false, 2, mmb::audio_format::s16le, 16000, 50, 2));
     }
 
     SECTION("fill() and getBuf() data round-trip")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_fill", true, 1, 8, 8000, 100, 3));
+        REQUIRE(aud.open("/memaud_fill", true, 1, mmb::audio_format::u8, 8000, 100, 3));
 
         REQUIRE(aud.fill(0, 0xCC));
         mmb::memaud::audview view = aud.getBuf(0);
@@ -558,7 +607,7 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("Pointer arithmetic: setPtr / getPtr / next")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_ptr", true, 1, 8, 8000, 100, 4));
+        REQUIRE(aud.open("/memaud_ptr", true, 1, mmb::audio_format::u8, 8000, 100, 4));
 
         REQUIRE(aud.setPtr(0) == 0);
         REQUIRE(aud.getPtr(0) == 0);
@@ -576,7 +625,7 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("Pointer arithmetic wraps correctly for multi-step offsets")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_multiwrap", true, 1, 8, 8000, 100, 4));
+        REQUIRE(aud.open("/memaud_multiwrap", true, 1, mmb::audio_format::u8, 8000, 100, 4));
         REQUIRE(aud.setPtr(0) == 0);
 
         // getPtr: offsets beyond bufs
@@ -597,7 +646,7 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("getPtrErr: circular distance")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_ptrerr", true, 1, 8, 8000, 100, 8));
+        REQUIRE(aud.open("/memaud_ptrerr", true, 1, mmb::audio_format::u8, 8000, 100, 8));
         REQUIRE(aud.setPtr(4) == 4);
         REQUIRE(aud.getPtrErr(4, 0) == 0);
         REQUIRE(aud.getPtrErr(5, 1) == 0);
@@ -606,7 +655,7 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("open_existing")
     {
         mmb::memaud creator, ex;
-        REQUIRE(creator.open("/memaud_existing", true, 1, 8, 8000, 100, 2));
+        REQUIRE(creator.open("/memaud_existing", true, 1, mmb::audio_format::u8, 8000, 100, 2));
         REQUIRE(ex.open_existing("/memaud_existing"));
         REQUIRE(ex.isOpen());
     }
@@ -629,8 +678,8 @@ TEST_CASE("MemAud", "[memaud]")
 
         *(int64_t*)(p + mmb::memaud::hv_size)    = 4096;
         *(int64_t*)(p + mmb::memaud::hv_ch)      = 2;
-        *(int64_t*)(p + mmb::memaud::hv_bps)     = 16;
-        *(int64_t*)(p + mmb::memaud::hv_bitrate) = 48000;
+        *(int64_t*)(p + mmb::memaud::hv_format)  = (int64_t)mmb::audio_format::s16le;
+        *(int64_t*)(p + mmb::memaud::hv_samplerate) = 48000;
         *(int64_t*)(p + mmb::memaud::hv_fps)     = 100;
         *(int64_t*)(p + mmb::memaud::hv_bufs)    = 2;
         *(int64_t*)(p + mmb::memaud::hv_blocksz) = mmb::memaud::fv_last + (480 * 2 * 2);
@@ -642,7 +691,7 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("Sequence counter starts at zero and advances with next()")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_seq", true, 1, 8, 8000, 100, 4));
+        REQUIRE(aud.open("/memaud_seq", true, 1, mmb::audio_format::u8, 8000, 100, 4));
 
         REQUIRE(aud.getSeq() == 0);
         aud.next(1);
@@ -658,7 +707,7 @@ TEST_CASE("MemAud", "[memaud]")
     SECTION("Overrun detection: lag = getSeq() - rLastSeq >= getBufs()")
     {
         mmb::memaud aud;
-        REQUIRE(aud.open("/memaud_overrun", true, 1, 8, 8000, 100, 4));
+        REQUIRE(aud.open("/memaud_overrun", true, 1, mmb::audio_format::u8, 8000, 100, 4));
 
         aud.next(1);
         int64_t rPos     = 0;
@@ -1146,7 +1195,7 @@ TEST_CASE("Convenience APIs", "[helpers]")
     SECTION("memvid waitForFrame observes published frames")
     {
         mmb::memvid vid;
-        REQUIRE(vid.open("/helpers_vid_wait", true, 16, 8, 24, 30, 2));
+        REQUIRE(vid.open("/helpers_vid_wait", true, 16, 8, mmb::video_format::rgb24, 30, 2));
         int64_t seq = vid.getSeq();
         REQUIRE_FALSE(vid.waitForFrame(0, seq));
         vid.next(1);

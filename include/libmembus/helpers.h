@@ -79,8 +79,8 @@ private:
 class memvid_writer
 {
 public:
-    bool open(const std::string &name, int64_t w, int64_t h, int64_t fps, int64_t bufs)
-    { return m_vid.open(name, true, w, h, 24, fps, bufs); }
+    bool open(const std::string &name, int64_t w, int64_t h, video_format fmt, int64_t fps, int64_t bufs)
+    { return m_vid.open(name, true, w, h, fmt, fps, bufs); }
 
     bool fill(int64_t idx, int col) { return m_vid.fill(idx, col); }
     int64_t next(int64_t inc = 1) { return m_vid.next(inc); }
@@ -143,9 +143,9 @@ private:
 class memaud_writer
 {
 public:
-    bool open(const std::string &name, int64_t ch, int64_t bps, int64_t bitrate,
+    bool open(const std::string &name, int64_t ch, audio_format fmt, int64_t sampleRate,
               int64_t fps, int64_t bufs, bool bNew = true)
-    { return m_aud.open(name, true, ch, bps, bitrate, fps, bufs); }
+    { return m_aud.open(name, true, ch, fmt, sampleRate, fps, bufs); }
 
     bool fill(int64_t idx, int col) { return m_aud.fill(idx, col); }
     int64_t next(int64_t inc = 1) { return m_aud.next(inc); }

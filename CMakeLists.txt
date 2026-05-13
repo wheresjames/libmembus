@@ -84,6 +84,13 @@ if (LIBMEMBUS_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
+#-------------------------------------------------------------
+# Add benchmarks
+option(LIBMEMBUS_BUILD_BENCHMARKS "Build libmembus benchmarks" ON)
+if (LIBMEMBUS_BUILD_BENCHMARKS)
+    add_subdirectory(bench)
+endif()
+
 
 #-------------------------------------------------------------
 # Install library and headers

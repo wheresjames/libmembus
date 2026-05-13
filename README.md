@@ -25,6 +25,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - [Convenience Wrappers](#convenience-wrappers)
 - [Diagnostics](#diagnostics)
 - [Examples](#examples)
+- [Performance](#performance)
 - [Comparison to Similar Projects](#comparison-to-similar-projects)
 - [License](#license)
 
@@ -34,8 +35,8 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 
 - **`memmap`** — raw named shared memory buffer
 - **`memmsg`** — single-producer, multi-consumer message queue with overrun detection
-- **`memvid`** — lock-free multi-buffer video ring buffer (24-bit RGB) with overrun detection
-- **`memaud`** — lock-free multi-buffer audio ring buffer (8-bit or 16-bit PCM) with overrun detection
+- **`memvid`** — lock-free multi-buffer video ring buffer with explicit packed pixel formats and overrun detection
+- **`memaud`** — lock-free multi-buffer audio ring buffer with explicit sample formats and overrun detection
 - **`memcmd`** — multi-producer, multi-consumer broadcast command channel with overrun detection
 - **`memkv`** — fixed-schema key-value store; lock-free seqlock reads, atomic batch writes, change notifications
 - Convenience wrappers for common reader/writer roles
@@ -98,6 +99,12 @@ Examples are built by default. Disable them with:
 
 ```bash
 cmake . -B ./build -DLIBMEMBUS_BUILD_EXAMPLES=OFF
+```
+
+Benchmarks are built by default. Disable them with:
+
+```bash
+cmake . -B ./build -DLIBMEMBUS_BUILD_BENCHMARKS=OFF
 ```
 
 ---
@@ -365,16 +372,17 @@ Notes:
 
 ### memvid — video ring buffer
 
-Lock-free ring buffer of raw 24-bit RGB frames. The writer calls `next()` to publish each frame; readers observe the write pointer and per-frame sequence numbers independently.
+Lock-free ring buffer of raw packed video frames. The writer calls `next()` to publish each frame; readers observe the write pointer and per-frame sequence numbers independently.
 
 ```cpp
 mmb::memvid producer, consumer;
 
-// Create: 1920x1080, 24bpp, 30fps, 4-frame ring buffer
-producer.open("/my_video", /*bCreate=*/true, 1920, 1080, 24, 30, /*bufs=*/4);
+// Create: 1920x1080 RGB24, 30fps, 4-frame ring buffer
+producer.open("/my_video", /*bCreate=*/true,
+              1920, 1080, mmb::video_format::rgb24, 30, /*bufs=*/4);
 
 // Attach from another process (with known parameters)
-consumer.open("/my_video", false, 1920, 1080, 24, 30, 4);
+consumer.open("/my_video", false, 1920, 1080, mmb::video_format::rgb24, 30, 4);
 
 // Attach without knowing the parameters
 consumer.open_existing("/my_video");
@@ -390,6 +398,7 @@ mmb::memvid::vidview frame = consumer.getBuf(rPos);
 // frame.m_w    — width
 // frame.m_h    — height
 // frame.m_sw   — scan width (bytes per row)
+// frame.m_format — pixel format
 // frame.m_size — total bytes (m_sw * m_h)
 ```
 
@@ -414,9 +423,24 @@ mmb::memvid::vidview frame = consumer.getBuf(rPos);
 |--------|-------------|
 | `getWidth()` | Frame width in pixels |
 | `getHeight()` | Frame height in pixels |
-| `getBpp()` | Bits per pixel (always 24) |
+| `getFormat()` | Pixel format enum |
+| `getFormatName()` | Pixel format name |
 | `getFps()` | Frames per second |
 | `getBufs()` | Number of slots in the ring |
+
+Supported video formats are stored in the shared-memory header as an `int64_t` at `memvid::hv_format` byte offset `56`:
+
+| Format name | Header value | Bytes per pixel |
+|---|---:|---:|
+| `gray8` | `1` | 1 |
+| `rgb24` | `2` | 3 |
+| `bgr24` | `3` | 3 |
+| `rgba32` | `4` | 4 |
+| `bgra32` | `5` | 4 |
+| `yuyv422` | `6` | 2 |
+| `uyvy422` | `7` | 2 |
+
+The YUV 4:2:2 formats are packed and require an even frame width.
 
 ---
 
@@ -427,11 +451,12 @@ Same lock-free ring-buffer model as `memvid` but for PCM audio buffers.
 ```cpp
 mmb::memaud producer, consumer;
 
-// Create: stereo, 16-bit, 44100 Hz sample rate, 30 buffers/sec, 3-buffer ring
+// Create: stereo S16LE, 44100 Hz sample rate, 30 buffers/sec, 3-buffer ring
 producer.open("/my_audio", /*bCreate=*/true,
-              /*ch=*/2, /*bps=*/16, /*bitrate=*/44100, /*fps=*/30, /*bufs=*/3);
+              /*ch=*/2, mmb::audio_format::s16le, /*sampleRate=*/44100,
+              /*fps=*/30, /*bufs=*/3);
 
-consumer.open("/my_audio", false, 2, 16, 44100, 30, 3);
+consumer.open("/my_audio", false, 2, mmb::audio_format::s16le, 44100, 30, 3);
 // Or:
 consumer.open_existing("/my_audio");
 
@@ -444,7 +469,7 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 // buf.m_ptr  — raw sample data
 // buf.m_size — size in bytes
 // buf.m_ch   — channels
-// buf.m_bps  — bits per sample
+// buf.m_format — sample format
 ```
 
 `open_existing()` validates the header and rejects malformed or undersized shares before exposing buffer views.
@@ -454,8 +479,10 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 | Method | Description |
 |--------|-------------|
 | `getChannels()` | Number of channels |
-| `getBps()` | Bits per sample (8 or 16) |
-| `getBitRate()` | Sample rate in Hz |
+| `getFormat()` | Sample format enum |
+| `getFormatName()` | Sample format name |
+| `getBytesPerSample()` | Bytes per sample for one channel |
+| `getSampleRate()` | Sample rate in Hz |
 | `getFps()` | Buffers per second |
 | `getBufs()` | Number of slots in the ring |
 | `getBufSize()` | Bytes per buffer |
@@ -463,7 +490,16 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 The pointer/sequence/session helpers (`setPtr`, `getPtr`, `next`, `getPtrErr`, `getSeq`, `getFrameSeq`, `getSessionId`) work identically to the `memvid` equivalents.
 `waitForFrame(wait_ms, lastSeq)` is also available and follows the same polling semantics.
 
-Supported `bps` values: `8` or `16`.
+Supported audio formats are stored in the shared-memory header as an `int64_t` at `memaud::hv_format` byte offset `40`:
+
+| Format name | Header value | Bytes per sample |
+|---|---:|---:|
+| `u8` | `1` | 1 |
+| `s16le` | `2` | 2 |
+| `s24le` | `3` | 3 |
+| `s32le` | `4` | 4 |
+| `f32le` | `5` | 4 |
+| `f64le` | `6` | 8 |
 
 ---
 
@@ -614,7 +650,7 @@ The core classes remain available directly, but `libmembus.h` also includes smal
 | `memmsg_reader` | `memmsg` | Attaches/reads a message queue |
 | `memcmd_sender` | `memcmd` | Attaches and writes commands |
 | `memcmd_receiver` | `memcmd` | Creates/attaches as a registered command reader |
-| `memvid_writer` | `memvid` | Creates a 24-bit video ring and publishes frames |
+| `memvid_writer` | `memvid` | Creates a video ring and publishes frames |
 | `memvid_reader` | `memvid` | Opens an existing video ring, tracks position, detects overrun |
 | `memaud_writer` | `memaud` | Creates an audio ring and publishes buffers |
 | `memaud_reader` | `memaud` | Opens an existing audio ring, tracks position, detects overrun |
@@ -661,6 +697,51 @@ Runnable examples live in `examples/` and are built by default:
 ```
 
 They are intentionally small and cover the common happy-path setup for each abstraction family.
+
+---
+
+## Performance
+
+Benchmarks are local shared-memory tests. They are useful for comparing operation costs inside this library, but results vary significantly by CPU, kernel, compiler, build type, scheduler noise, and payload size. The current harness is intentionally simple and focuses on throughput; cross-process latency percentiles are a good future extension.
+
+Run the benchmark and regenerate the README artifacts:
+
+```bash
+./build/bench/bench-libmembus --duration-ms 1000 --json bench/results/latest.json
+python3 bench/plot_results.py bench/results/latest.json bench/results
+```
+
+![Operations throughput](bench/results/throughput_ops.svg)
+
+![Data throughput](bench/results/throughput_mib.svg)
+
+Latest generated summary:
+
+<!-- BEGIN BENCHMARK SUMMARY -->
+<!-- Generated by bench/plot_results.py. Do not edit by hand. -->
+
+Benchmark duration: `500 ms` per case
+
+System: `Linux 6.18.5+kali-amd64 x86_64`
+
+| Benchmark | Payload | Ops/sec | MiB/sec | ns/op |
+|---|---:|---:|---:|---:|
+| memmap read/write | 64 KiB | 397.12K | 49640.6 | 2518.1 |
+| memmsg single writer/reader | 64 B | 7.40M | 451.6 | 135.2 |
+| memcmd 4 writers/1 reader | 64 B | 7.45M | 454.9 | 134.2 |
+| memkv setValue | 64 B value | 10.28M | 627.2 | 97.3 |
+| memkv getValue | 64 B value | 31.39M | 1916.0 | 31.9 |
+| memvid publish | 640x480 | 46.55K | 40911.0 | 21483.4 |
+| memvid publish | 1920x1080 | 3.87K | 22965.1 | 258332.0 |
+| memaud publish | stereo S16LE 48k/100fps | 18.65M | 34153.3 | 53.6 |
+<!-- END BENCHMARK SUMMARY -->
+
+Generated files:
+
+- `bench/results/latest.json`
+- `bench/results/summary.md`
+- `bench/results/throughput_ops.svg`
+- `bench/results/throughput_mib.svg`
 
 ---
 

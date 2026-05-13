@@ -3,6 +3,20 @@
 namespace LIBMEMBUS_NS
 {
 
+enum class video_format : int64_t
+{
+    gray8 = 1,
+    rgb24,
+    bgr24,
+    rgba32,
+    bgra32,
+    yuyv422,
+    uyvy422
+};
+
+const char *video_format_name(video_format fmt);
+int64_t video_format_bytes_per_pixel(video_format fmt);
+
 /** Memory mapped video buffer
 
 */
@@ -41,8 +55,8 @@ public:
             @param [in] w   - Image width
             @param [in] h   - Image height
         */
-        vidview(char* p, int64_t sz, int64_t sw, int64_t w, int64_t h)
-            : m_ptr(p), m_size(sz), m_sw(sw), m_w(w), m_h(h)
+        vidview(char* p, int64_t sz, int64_t sw, int64_t w, int64_t h, video_format fmt)
+            : m_ptr(p), m_size(sz), m_sw(sw), m_w(w), m_h(h), m_format(fmt)
         {
         }
 
@@ -67,6 +81,7 @@ public:
             m_w = r.m_w;
             m_h = r.m_h;
             m_sw = r.m_sw;
+            m_format = r.m_format;
 
             return *this;
         }
@@ -87,6 +102,9 @@ public:
 
         /// Image scan width
         int64_t     m_sw;
+
+        /// Pixel format
+        video_format m_format;
     };
 
     /// Main header
@@ -99,7 +117,7 @@ public:
         hv_width        = 4 * sizeof(int64_t),
         hv_height       = 5 * sizeof(int64_t),
         hv_scanwidth    = 6 * sizeof(int64_t),
-        hv_bpp          = 7 * sizeof(int64_t),
+        hv_format       = 7 * sizeof(int64_t),
         hv_fps          = 8 * sizeof(int64_t),
         hv_bufs         = 9 * sizeof(int64_t),
         hv_blocksz      = 10 * sizeof(int64_t),
@@ -126,7 +144,7 @@ public:
 
     /// Creates / attaches to an image ring buffer in memory
     bool open(const std::string &sName, bool bCreate,
-              int64_t w, int64_t h, int64_t bpp,
+              int64_t w, int64_t h, video_format fmt,
               int64_t fps, int64_t bufs);
 
     /// Open an existing image share
@@ -174,8 +192,11 @@ public:
     /// Image width
     int64_t getHeight();
 
-    /// Image bpp
-    int64_t getBpp();
+    /// Pixel format
+    video_format getFormat();
+
+    /// Pixel format name
+    const char *getFormatName();
 
     /// Image fps
     int64_t getFps();

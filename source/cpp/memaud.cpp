@@ -8,6 +8,34 @@
 namespace LIBMEMBUS_NS
 {
 
+const char *audio_format_name(audio_format fmt)
+{
+    switch (fmt)
+    {
+    case audio_format::u8:    return "U8";
+    case audio_format::s16le: return "S16LE";
+    case audio_format::s24le: return "S24LE";
+    case audio_format::s32le: return "S32LE";
+    case audio_format::f32le: return "F32LE";
+    case audio_format::f64le: return "F64LE";
+    }
+    return "unknown";
+}
+
+int64_t audio_format_bytes_per_sample(audio_format fmt)
+{
+    switch (fmt)
+    {
+    case audio_format::u8:    return 1;
+    case audio_format::s16le: return 2;
+    case audio_format::s24le: return 3;
+    case audio_format::s32le: return 4;
+    case audio_format::f32le: return 4;
+    case audio_format::f64le: return 8;
+    }
+    return 0;
+}
+
 namespace
 {
     bool checkedAdd(int64_t a, int64_t b, int64_t &out)
@@ -26,14 +54,14 @@ namespace
         return true;
     }
 
-    bool calcLayout(int64_t ch, int64_t bps, int64_t bitrate, int64_t fps, int64_t bufs,
+    bool calcLayout(int64_t ch, audio_format fmt, int64_t sampleRate, int64_t fps, int64_t bufs,
                     int64_t &blocksz, int64_t &total)
     {
-        if (ch <= 0 || (bps != 8 && bps != 16) || bitrate <= 0 || fps <= 0 || bufs <= 0)
+        int64_t sampleBytes = audio_format_bytes_per_sample(fmt);
+        if (ch <= 0 || sampleBytes <= 0 || sampleRate <= 0 || fps <= 0 || bufs <= 0)
             return false;
 
-        int64_t samplesPerFrame = bitrate / fps;
-        int64_t sampleBytes = memaud::fitTo<int64_t>(bps, 8);
+        int64_t samplesPerFrame = sampleRate / fps;
         int64_t payload = 0, channelPayload = 0, blocks = 0;
         if (samplesPerFrame <= 0
             || !checkedMul(samplesPerFrame, sampleBytes, payload)
@@ -53,14 +81,14 @@ namespace
 
         int64_t size    = *(int64_t*)(p + memaud::hv_size);
         int64_t ch      = *(int64_t*)(p + memaud::hv_ch);
-        int64_t bps     = *(int64_t*)(p + memaud::hv_bps);
-        int64_t bitrate = *(int64_t*)(p + memaud::hv_bitrate);
+        audio_format fmt = (audio_format)*(int64_t*)(p + memaud::hv_format);
+        int64_t sampleRate = *(int64_t*)(p + memaud::hv_samplerate);
         int64_t fps     = *(int64_t*)(p + memaud::hv_fps);
         int64_t bufs    = *(int64_t*)(p + memaud::hv_bufs);
         int64_t blocksz = *(int64_t*)(p + memaud::hv_blocksz);
         int64_t calcBlock = 0, calcTotal = 0;
 
-        return calcLayout(ch, bps, bitrate, fps, bufs, calcBlock, calcTotal)
+        return calcLayout(ch, fmt, sampleRate, fps, bufs, calcBlock, calcTotal)
             && blocksz == calcBlock
             && size == calcTotal
             && size <= mappedSize;
@@ -76,7 +104,7 @@ memaud::audview memaud::getBuf(int64_t idx) noexcept(false)
     int64_t *pSize = (int64_t*)(p + hv_size);
     int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pCh = (int64_t*)(p + hv_ch);
-    int64_t *pBps = (int64_t*)(p + hv_bps);
+    audio_format fmt = (audio_format)*(int64_t*)(p + hv_format);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
 
@@ -86,7 +114,7 @@ memaud::audview memaud::getBuf(int64_t idx) noexcept(false)
     idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
     return memaud::audview(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last,
-                           *pBlockSz - fv_last, *pCh, *pBps);
+                           *pBlockSz - fv_last, *pCh, fmt);
 }
 
 bool memaud::fill(int64_t idx, int col)
@@ -98,7 +126,6 @@ bool memaud::fill(int64_t idx, int col)
     int64_t *pSize = (int64_t*)(p + hv_size);
     int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pCh = (int64_t*)(p + hv_ch);
-    int64_t *pBps = (int64_t*)(p + hv_bps);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
 
@@ -271,22 +298,32 @@ int64_t memaud::getChannels()
     return *(int64_t*)(p + hv_ch);
 }
 
-int64_t memaud::getBps()
+audio_format memaud::getFormat()
 {
     char *p = m_mem.data();
     if (!p)
-        return 0;
+        return (audio_format)0;
 
-    return *(int64_t*)(p + hv_bps);
+    return (audio_format)*(int64_t*)(p + hv_format);
 }
 
-int64_t memaud::getBitRate()
+const char *memaud::getFormatName()
+{
+    return audio_format_name(getFormat());
+}
+
+int64_t memaud::getBytesPerSample()
+{
+    return audio_format_bytes_per_sample(getFormat());
+}
+
+int64_t memaud::getSampleRate()
 {
     char *p = m_mem.data();
     if (!p)
         return 0;
 
-    return *(int64_t*)(p + hv_bitrate);
+    return *(int64_t*)(p + hv_samplerate);
 }
 
 int64_t memaud::getFps()
@@ -304,11 +341,7 @@ int64_t memaud::getBufSize()
     if (!p)
         return 0;
 
-    int64_t ch = *(int64_t*)(p + hv_ch);
-    if (1 > ch)
-        ch = 1;
-
-    return (*(int64_t*)(p + hv_blocksz) - fv_last) / ch / 2;
+    return *(int64_t*)(p + hv_blocksz) - fv_last;
 }
 
 
@@ -342,12 +375,12 @@ bool memaud::open_existing(const std::string &sName)
 }
 
 
-bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, int64_t bps, int64_t bitrate, int64_t fps, int64_t bufs)
+bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, audio_format fmt, int64_t sampleRate, int64_t fps, int64_t bufs)
 {
     close();
 
     int64_t blocksz = 0, total = 0;
-    if (!calcLayout(ch, bps, bitrate, fps, bufs, blocksz, total))
+    if (!calcLayout(ch, fmt, sampleRate, fps, bufs, blocksz, total))
         return false;
 
     // Try to open the memory share
@@ -366,8 +399,8 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, int64_t bp
     int64_t *pSize = (int64_t*)(p + hv_size);
     int64_t *pPtr = (int64_t*)(p + hv_ptr);
     int64_t *pCh = (int64_t*)(p + hv_ch);
-    int64_t *pBps = (int64_t*)(p + hv_bps);
-    int64_t *pBitRate = (int64_t*)(p + hv_bitrate);
+    int64_t *pFormat = (int64_t*)(p + hv_format);
+    int64_t *pSampleRate = (int64_t*)(p + hv_samplerate);
     int64_t *pFps = (int64_t*)(p + hv_fps);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
@@ -380,8 +413,8 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, int64_t bp
         *(int64_t*)(p + hv_seq) = 0;
         *(int64_t*)(p + hv_id)  = (int64_t)std::mt19937_64(std::random_device{}())();
         *pCh = ch;
-        *pBps = bps;
-        *pBitRate = bitrate;
+        *pFormat = (int64_t)fmt;
+        *pSampleRate = sampleRate;
         *pFps = fps;
         *pBufs = bufs;
         *pBlockSz = blocksz;
@@ -391,8 +424,8 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, int64_t bp
     else if (!validateMappedLayout(p, m_mem.size())
              || *pSize != total
              || *pCh != ch
-             || *pBps != bps
-             || *pBitRate != bitrate
+             || *pFormat != (int64_t)fmt
+             || *pSampleRate != sampleRate
              || *pFps != fps
              || *pBufs != bufs
              || *pBlockSz != blocksz)

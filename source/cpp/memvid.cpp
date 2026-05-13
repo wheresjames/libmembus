@@ -8,6 +8,36 @@
 namespace LIBMEMBUS_NS
 {
 
+const char *video_format_name(video_format fmt)
+{
+    switch (fmt)
+    {
+    case video_format::gray8:   return "GRAY8";
+    case video_format::rgb24:   return "RGB24";
+    case video_format::bgr24:   return "BGR24";
+    case video_format::rgba32:  return "RGBA32";
+    case video_format::bgra32:  return "BGRA32";
+    case video_format::yuyv422: return "YUYV422";
+    case video_format::uyvy422: return "UYVY422";
+    }
+    return "unknown";
+}
+
+int64_t video_format_bytes_per_pixel(video_format fmt)
+{
+    switch (fmt)
+    {
+    case video_format::gray8:   return 1;
+    case video_format::rgb24:   return 3;
+    case video_format::bgr24:   return 3;
+    case video_format::rgba32:  return 4;
+    case video_format::bgra32:  return 4;
+    case video_format::yuyv422: return 2;
+    case video_format::uyvy422: return 2;
+    }
+    return 0;
+}
+
 namespace
 {
     bool checkedAdd(int64_t a, int64_t b, int64_t &out)
@@ -26,13 +56,15 @@ namespace
         return true;
     }
 
-    bool calcLayout(int64_t w, int64_t h, int64_t bpp, int64_t bufs,
+    bool calcLayout(int64_t w, int64_t h, video_format fmt, int64_t bufs,
                     int64_t &sw, int64_t &blocksz, int64_t &total)
     {
-        if (w <= 0 || h <= 0 || bpp != 24 || bufs <= 0)
+        int64_t bytesPerPixel = video_format_bytes_per_pixel(fmt);
+        if (w <= 0 || h <= 0 || bytesPerPixel <= 0 || bufs <= 0)
+            return false;
+        if ((fmt == video_format::yuyv422 || fmt == video_format::uyvy422) && (w % 2) != 0)
             return false;
 
-        int64_t bytesPerPixel = memvid::fitTo<int64_t>(bpp, 8);
         int64_t payload = 0, blocks = 0;
         if (!checkedMul(w, bytesPerPixel, sw)
             || !checkedMul(sw, h, payload)
@@ -53,14 +85,14 @@ namespace
         int64_t width     = *(int64_t*)(p + memvid::hv_width);
         int64_t height    = *(int64_t*)(p + memvid::hv_height);
         int64_t scanWidth = *(int64_t*)(p + memvid::hv_scanwidth);
-        int64_t bpp       = *(int64_t*)(p + memvid::hv_bpp);
+        video_format fmt  = (video_format)*(int64_t*)(p + memvid::hv_format);
         int64_t fps       = *(int64_t*)(p + memvid::hv_fps);
         int64_t bufs      = *(int64_t*)(p + memvid::hv_bufs);
         int64_t blocksz   = *(int64_t*)(p + memvid::hv_blocksz);
         int64_t calcSw = 0, calcBlock = 0, calcTotal = 0;
 
         return fps > 0
-            && calcLayout(width, height, bpp, bufs, calcSw, calcBlock, calcTotal)
+            && calcLayout(width, height, fmt, bufs, calcSw, calcBlock, calcTotal)
             && scanWidth == calcSw
             && blocksz == calcBlock
             && size == calcTotal
@@ -79,7 +111,7 @@ memvid::vidview memvid::getBuf(int64_t idx) noexcept(false)
     int64_t *pWidth = (int64_t*)(p + hv_width);
     int64_t *pHeight = (int64_t*)(p + hv_height);
     int64_t *pScanWidth = (int64_t*)(p + hv_scanwidth);
-    int64_t *pBpp = (int64_t*)(p + hv_bpp);
+    video_format fmt = (video_format)*(int64_t*)(p + hv_format);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
 
@@ -89,7 +121,7 @@ memvid::vidview memvid::getBuf(int64_t idx) noexcept(false)
     idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
     return memvid::vidview(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last,
-                           *pScanWidth * *pHeight, *pScanWidth, *pWidth, *pHeight);
+                           *pScanWidth * *pHeight, *pScanWidth, *pWidth, *pHeight, fmt);
 }
 
 bool memvid::fill(int64_t idx, int col)
@@ -103,7 +135,6 @@ bool memvid::fill(int64_t idx, int col)
     int64_t *pWidth = (int64_t*)(p + hv_width);
     int64_t *pHeight = (int64_t*)(p + hv_height);
     int64_t *pScanWidth = (int64_t*)(p + hv_scanwidth);
-    int64_t *pBpp = (int64_t*)(p + hv_bpp);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
 
@@ -288,13 +319,18 @@ int64_t memvid::getHeight()
     return *(int64_t*)(p + hv_height);
 }
 
-int64_t memvid::getBpp()
+video_format memvid::getFormat()
 {
     char *p = m_mem.data();
     if (!p)
-        return -1;
+        return (video_format)0;
 
-    return *(int64_t*)(p + hv_bpp);
+    return (video_format)*(int64_t*)(p + hv_format);
+}
+
+const char *memvid::getFormatName()
+{
+    return video_format_name(getFormat());
 }
 
 int64_t memvid::getFps()
@@ -337,12 +373,12 @@ bool memvid::open_existing(const std::string &sName)
 
 
 bool memvid::open(const std::string &sName, bool bCreate, int64_t w, int64_t h,
-                  int64_t bpp, int64_t fps, int64_t bufs)
+                  video_format fmt, int64_t fps, int64_t bufs)
 {
     close();
 
     int64_t sw = 0, blocksz = 0, total = 0;
-    if (0 >= fps || !calcLayout(w, h, bpp, bufs, sw, blocksz, total))
+    if (0 >= fps || !calcLayout(w, h, fmt, bufs, sw, blocksz, total))
         return false;
 
     // Try to open the memory share
@@ -363,7 +399,7 @@ bool memvid::open(const std::string &sName, bool bCreate, int64_t w, int64_t h,
     int64_t *pWidth = (int64_t*)(p + hv_width);
     int64_t *pHeight = (int64_t*)(p + hv_height);
     int64_t *pScanWidth = (int64_t*)(p + hv_scanwidth);
-    int64_t *pBpp = (int64_t*)(p + hv_bpp);
+    int64_t *pFormat = (int64_t*)(p + hv_format);
     int64_t *pFps = (int64_t*)(p + hv_fps);
     int64_t *pBufs = (int64_t*)(p + hv_bufs);
     int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
@@ -378,7 +414,7 @@ bool memvid::open(const std::string &sName, bool bCreate, int64_t w, int64_t h,
         *pWidth = w;
         *pHeight = h;
         *pScanWidth = sw;
-        *pBpp = bpp;
+        *pFormat = (int64_t)fmt;
         *pFps = fps;
         *pBufs = bufs;
         *pBlockSz = blocksz;
@@ -390,7 +426,7 @@ bool memvid::open(const std::string &sName, bool bCreate, int64_t w, int64_t h,
              || *pWidth != w
              || *pHeight != h
              || *pScanWidth != sw
-             || *pBpp != bpp
+             || *pFormat != (int64_t)fmt
              || *pFps != fps
              || *pBufs != bufs
              || *pBlockSz != blocksz)

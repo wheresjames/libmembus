@@ -3,6 +3,19 @@
 namespace LIBMEMBUS_NS
 {
 
+enum class audio_format : int64_t
+{
+    u8 = 1,
+    s16le,
+    s24le,
+    s32le,
+    f32le,
+    f64le
+};
+
+const char *audio_format_name(audio_format fmt);
+int64_t audio_format_bytes_per_sample(audio_format fmt);
+
 /** Memory mapped audio buffer
 */
 class memaud
@@ -37,10 +50,10 @@ public:
             @param [in] p   - Pointer to buffer
             @param [in] sz  - Size of buffer
             @param [in] ch  - Number of channels
-            @param [in] bps - Bit rate, (bits per sample)
+            @param [in] fmt - Sample format
         */
-        audview(char* p, int64_t sz, int64_t ch, int64_t bps)
-            : m_ptr(p), m_size(sz), m_ch(ch), m_bps(bps)
+        audview(char* p, int64_t sz, int64_t ch, audio_format fmt)
+            : m_ptr(p), m_size(sz), m_ch(ch), m_format(fmt)
         {
         }
 
@@ -63,7 +76,7 @@ public:
             m_ptr = r.m_ptr;
             m_size = r.m_size;
             m_ch = r.m_ch;
-            m_bps = r.m_bps;
+            m_format = r.m_format;
 
             return *this;
         }
@@ -79,8 +92,8 @@ public:
         /// Channels
         int64_t     m_ch;
 
-        /// Bits per sample
-        int64_t     m_bps;
+        /// Sample format
+        audio_format m_format;
     };
 
     /// Main header
@@ -91,8 +104,8 @@ public:
         hv_seq          = 2 * sizeof(int64_t),   // monotonic write-sequence counter
         hv_id           = 3 * sizeof(int64_t),   // random session ID, changes on every open(bCreate=true)
         hv_ch           = 4 * sizeof(int64_t),
-        hv_bps          = 5 * sizeof(int64_t),
-        hv_bitrate      = 6 * sizeof(int64_t),
+        hv_format       = 5 * sizeof(int64_t),
+        hv_samplerate   = 6 * sizeof(int64_t),
         hv_fps          = 7 * sizeof(int64_t),
         hv_bufs         = 8 * sizeof(int64_t),
         hv_blocksz      = 9 * sizeof(int64_t),
@@ -115,16 +128,16 @@ public:
     /// Close the buffer
     ~memaud() { close(); }
 
-    /// Creates / attaches to an image ring buffer in memory
-    bool open(const std::string &sName, bool bCreate, int64_t ch, int64_t bps, int64_t bitrate, int64_t fps, int64_t bufs);
+    /// Creates / attaches to an audio ring buffer in memory
+    bool open(const std::string &sName, bool bCreate, int64_t ch, audio_format fmt, int64_t sampleRate, int64_t fps, int64_t bufs);
 
-    /// Open an existing image share
+    /// Open an existing audio share
     bool open_existing(const std::string &sName);
 
     /// Remove a stale audio share from the OS namespace
     static bool remove(const std::string &sName) { return memmap::remove(sName); }
 
-    /// Close image share
+    /// Close audio share
     void close();
 
     /// Returns true if memory already existed
@@ -133,7 +146,7 @@ public:
     /// Returns true if a share is open
     bool isOpen() { return m_mem.isOpen(); }
 
-    /// Get image at specified index
+    /// Get audio buffer at specified index
     audview getBuf(int64_t idx) noexcept(false);
 
     /// Returns the number of image buffers
@@ -160,11 +173,17 @@ public:
     /// Channels
     int64_t getChannels();
 
-    /// Bits per second
-    int64_t getBps();
+    /// Sample format
+    audio_format getFormat();
 
-    /// Bit rate
-    int64_t getBitRate();
+    /// Sample format name
+    const char *getFormatName();
+
+    /// Bytes per sample
+    int64_t getBytesPerSample();
+
+    /// Sample rate
+    int64_t getSampleRate();
 
     /// Frames per second
     int64_t getFps();
