@@ -1,5 +1,5 @@
 name            libmembus
-version         0.1.0
+version         1.0.1
 description     Shared memory data bus
 company         wheresjames
 author          Robert Umbehant

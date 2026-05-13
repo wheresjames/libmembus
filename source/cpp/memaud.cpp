@@ -1,8 +1,69 @@
 
 #include "libmembus-internal.h"
 
+#include <limits>
+
 namespace LIBMEMBUS_NS
 {
+
+namespace
+{
+    bool checkedAdd(int64_t a, int64_t b, int64_t &out)
+    {
+        if (a < 0 || b < 0 || a > std::numeric_limits<int64_t>::max() - b)
+            return false;
+        out = a + b;
+        return true;
+    }
+
+    bool checkedMul(int64_t a, int64_t b, int64_t &out)
+    {
+        if (a < 0 || b < 0 || (a != 0 && b > std::numeric_limits<int64_t>::max() / a))
+            return false;
+        out = a * b;
+        return true;
+    }
+
+    bool calcLayout(int64_t ch, int64_t bps, int64_t bitrate, int64_t fps, int64_t bufs,
+                    int64_t &blocksz, int64_t &total)
+    {
+        if (ch <= 0 || (bps != 8 && bps != 16) || bitrate <= 0 || fps <= 0 || bufs <= 0)
+            return false;
+
+        int64_t samplesPerFrame = bitrate / fps;
+        int64_t sampleBytes = memaud::fitTo<int64_t>(bps, 8);
+        int64_t payload = 0, channelPayload = 0, blocks = 0;
+        if (samplesPerFrame <= 0
+            || !checkedMul(samplesPerFrame, sampleBytes, payload)
+            || !checkedMul(payload, ch, channelPayload)
+            || !checkedAdd(memaud::fv_last, channelPayload, blocksz)
+            || !checkedMul(blocksz, bufs, blocks)
+            || !checkedAdd(memaud::hv_last, blocks, total))
+            return false;
+
+        return true;
+    }
+
+    bool validateMappedLayout(char *p, int64_t mappedSize)
+    {
+        if (!p || mappedSize < memaud::hv_last)
+            return false;
+
+        int64_t size    = *(int64_t*)(p + memaud::hv_size);
+        int64_t ch      = *(int64_t*)(p + memaud::hv_ch);
+        int64_t bps     = *(int64_t*)(p + memaud::hv_bps);
+        int64_t bitrate = *(int64_t*)(p + memaud::hv_bitrate);
+        int64_t fps     = *(int64_t*)(p + memaud::hv_fps);
+        int64_t bufs    = *(int64_t*)(p + memaud::hv_bufs);
+        int64_t blocksz = *(int64_t*)(p + memaud::hv_blocksz);
+        int64_t calcBlock = 0, calcTotal = 0;
+
+        return calcLayout(ch, bps, bitrate, fps, bufs, calcBlock, calcTotal)
+            && blocksz == calcBlock
+            && size == calcTotal
+            && size <= mappedSize;
+    }
+}
 
 memaud::audview memaud::getBuf(int64_t idx) noexcept(false)
 {
@@ -248,12 +309,7 @@ bool memaud::open_existing(const std::string &sName)
     }
 
     // Validate critical header fields before trusting them for pointer arithmetic
-    int64_t *pSize    = (int64_t*)(p + hv_size);
-    int64_t *pCh      = (int64_t*)(p + hv_ch);
-    int64_t *pBufs    = (int64_t*)(p + hv_bufs);
-    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
-
-    if (0 >= *pSize || 0 >= *pCh || 0 >= *pBufs || 0 >= *pBlockSz)
+    if (!validateMappedLayout(p, m_mem.size()))
     {
         close();
         return false;
@@ -267,18 +323,9 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, int64_t bp
 {
     close();
 
-    // Param check
-    if (0 >= ch || (8 != bps && 16 != bps) || 0 >= bitrate || 0 >= fps || 0 >= bufs)
+    int64_t blocksz = 0, total = 0;
+    if (!calcLayout(ch, bps, bitrate, fps, bufs, blocksz, total))
         return false;
-
-    // Calculate sample size
-    int64_t ss = fitTo<int64_t>(bps, 8);
-
-    // Image block size
-    int64_t blocksz = fv_last + ((int64_t)(bitrate / fps) * ss * ch);
-
-    // How much total memory do we need?
-    int64_t total = hv_last + (blocksz * bufs);
 
     // Try to open the memory share
     if (!m_mem.open(sName, total, bCreate, bCreate))
@@ -318,7 +365,8 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, int64_t bp
     }
 
     // Exists, so makes sure it matches what we expect
-    else if (*pSize != total
+    else if (!validateMappedLayout(p, m_mem.size())
+             || *pSize != total
              || *pCh != ch
              || *pBps != bps
              || *pBitRate != bitrate

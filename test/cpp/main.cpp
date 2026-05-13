@@ -78,8 +78,24 @@ TEST_CASE("MemMap", "[memmap]")
     SECTION("read() on unopened map returns empty string")
     {
         mmb::memmap m;
+        REQUIRE_FALSE(m.isOpen());
+        REQUIRE(m.size() == 0);
         REQUIRE(m.read().empty());
         REQUIRE(m.read(10).empty());
+    }
+
+    SECTION("Opening an existing map with bCreate does not truncate it")
+    {
+        mmb::memmap creator, attacher;
+        REQUIRE(creator.open("/test_memmap_no_truncate", 128, true, true));
+
+        std::string payload = "payload that must survive attach";
+        REQUIRE(creator.write(payload) == (int64_t)payload.size());
+
+        REQUIRE(attacher.open("/test_memmap_no_truncate", 16, true, false));
+        REQUIRE(attacher.existing());
+        REQUIRE(attacher.size() == 128);
+        REQUIRE(attacher.read(payload.size()) == payload);
     }
 
     SECTION("Attaching with nSize=0 reports the creator's actual size")
@@ -177,6 +193,16 @@ TEST_CASE("MessageQueue edge cases", "[memmsg]")
         REQUIRE_FALSE(tx.existing());
         REQUIRE(rx.open("/mymsg_existing", 256, false, false));
         REQUIRE(rx.existing());
+    }
+
+    SECTION("Attach rejects shares too small for the requested buffer")
+    {
+        mmb::memmap raw;
+        REQUIRE(raw.open("/mymsg_small_backing", 16, true, true));
+        ((int64_t*)raw.data())[0] = 256;
+
+        mmb::memmsg rx;
+        REQUIRE_FALSE(rx.open("/mymsg_small_backing", 256, false, false));
     }
 
     SECTION("Multiple messages round-trip")
@@ -367,6 +393,26 @@ TEST_CASE("MemVid", "[memvid]")
 
         mmb::memvid vid;
         REQUIRE_FALSE(vid.open_existing("/memvid_zerohdr"));
+    }
+
+    SECTION("open_existing rejects headers whose layout exceeds the mapped size")
+    {
+        mmb::memmap raw;
+        REQUIRE(raw.open("/memvid_badhdr", 128, true, true));
+        char *p = raw.data();
+        REQUIRE(p != nullptr);
+
+        *(int64_t*)(p + mmb::memvid::hv_size)      = 4096;
+        *(int64_t*)(p + mmb::memvid::hv_width)     = 64;
+        *(int64_t*)(p + mmb::memvid::hv_height)    = 64;
+        *(int64_t*)(p + mmb::memvid::hv_scanwidth) = 192;
+        *(int64_t*)(p + mmb::memvid::hv_bpp)       = 24;
+        *(int64_t*)(p + mmb::memvid::hv_fps)       = 30;
+        *(int64_t*)(p + mmb::memvid::hv_bufs)      = 2;
+        *(int64_t*)(p + mmb::memvid::hv_blocksz)   = mmb::memvid::fv_last + (192 * 64);
+
+        mmb::memvid vid;
+        REQUIRE_FALSE(vid.open_existing("/memvid_badhdr"));
     }
 
     SECTION("Sequence counter starts at zero and advances with next()")
@@ -568,6 +614,25 @@ TEST_CASE("MemAud", "[memaud]")
 
         mmb::memaud aud;
         REQUIRE_FALSE(aud.open_existing("/memaud_zerohdr"));
+    }
+
+    SECTION("open_existing rejects headers whose layout exceeds the mapped size")
+    {
+        mmb::memmap raw;
+        REQUIRE(raw.open("/memaud_badhdr", 128, true, true));
+        char *p = raw.data();
+        REQUIRE(p != nullptr);
+
+        *(int64_t*)(p + mmb::memaud::hv_size)    = 4096;
+        *(int64_t*)(p + mmb::memaud::hv_ch)      = 2;
+        *(int64_t*)(p + mmb::memaud::hv_bps)     = 16;
+        *(int64_t*)(p + mmb::memaud::hv_bitrate) = 48000;
+        *(int64_t*)(p + mmb::memaud::hv_fps)     = 100;
+        *(int64_t*)(p + mmb::memaud::hv_bufs)    = 2;
+        *(int64_t*)(p + mmb::memaud::hv_blocksz) = mmb::memaud::fv_last + (480 * 2 * 2);
+
+        mmb::memaud aud;
+        REQUIRE_FALSE(aud.open_existing("/memaud_badhdr"));
     }
 
     SECTION("Sequence counter starts at zero and advances with next()")
@@ -791,6 +856,16 @@ TEST_CASE("MemCmd", "[memcmd]")
                 REQUIRE(receiver.read(0) == msg);
             }
         }
+    }
+
+    SECTION("Attach rejects shares too small for the requested buffer")
+    {
+        mmb::memmap raw;
+        REQUIRE(raw.open("/memcmd_small_backing", 16, true, true));
+        ((int64_t*)raw.data())[0] = 256;
+
+        mmb::memcmd cmd;
+        REQUIRE_FALSE(cmd.open("/memcmd_small_backing", 256));
     }
 }
 
@@ -1027,5 +1102,20 @@ TEST_CASE("MemKV", "[memkv]")
         REQUIRE(kv.setAll({{"known", "yes"}, {"mystery", "ignored"}, {"also_known", "also_yes"}}));
         REQUIRE(kv.getValue("known")      == "yes");
         REQUIRE(kv.getValue("also_known") == "also_yes");
+    }
+
+    SECTION("open rejects headers whose schema exceeds the mapped size")
+    {
+        mmb::memmap raw;
+        REQUIRE(raw.open("/memkv_badhdr", 64, true, true));
+        char *p = raw.data();
+        REQUIRE(p != nullptr);
+
+        ((int64_t*)p)[0] = 2;      // count
+        ((int64_t*)p)[1] = 1024;   // maxNameLen
+        ((int64_t*)p)[2] = 1024;   // maxValueLen
+
+        mmb::memkv kv;
+        REQUIRE_FALSE(kv.open("/memkv_badhdr"));
     }
 }

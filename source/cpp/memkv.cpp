@@ -1,6 +1,8 @@
 
 #include "libmembus-internal.h"
 
+#include <limits>
+
 namespace LIBMEMBUS_NS
 {
 
@@ -22,6 +24,40 @@ namespace
     const int64_t sv_lastEpoch = sizeof(int64_t);
     const int64_t sv_name      = 2 * sizeof(int64_t);
     // value follows name: sv_name + maxNameLen + 1
+
+    bool checkedAdd(int64_t a, int64_t b, int64_t &out)
+    {
+        if (a < 0 || b < 0 || a > std::numeric_limits<int64_t>::max() - b)
+            return false;
+        out = a + b;
+        return true;
+    }
+
+    bool checkedMul(int64_t a, int64_t b, int64_t &out)
+    {
+        if (a < 0 || b < 0 || (a != 0 && b > std::numeric_limits<int64_t>::max() / a))
+            return false;
+        out = a * b;
+        return true;
+    }
+
+    bool calcLayout(int64_t count, int64_t maxNameLen, int64_t maxValueLen,
+                    int64_t &slotStride, int64_t &totalSize)
+    {
+        if (count <= 0 || maxNameLen <= 0 || maxValueLen <= 0)
+            return false;
+
+        int64_t nameBytes = 0, valueBytes = 0, dataBytes = 0, slotsBytes = 0;
+        if (!checkedAdd(maxNameLen, 1, nameBytes)
+            || !checkedAdd(maxValueLen, 1, valueBytes)
+            || !checkedAdd(2 * (int64_t)sizeof(int64_t), nameBytes, dataBytes)
+            || !checkedAdd(dataBytes, valueBytes, slotStride)
+            || !checkedMul(count, slotStride, slotsBytes)
+            || !checkedAdd(hv_last, slotsBytes, totalSize))
+            return false;
+
+        return true;
+    }
 }
 
 
@@ -64,11 +100,9 @@ bool memkv::create(const std::string &sName,
 {
     close();
 
-    if (nCount <= 0 || maxNameLen <= 0 || maxValueLen <= 0)
+    int64_t slotStride = 0, totalSize = 0;
+    if (!calcLayout(nCount, maxNameLen, maxValueLen, slotStride, totalSize))
         return false;
-
-    int64_t slotStride = 2 * sizeof(int64_t) + (maxNameLen + 1) + (maxValueLen + 1);
-    int64_t totalSize  = hv_last + nCount * slotStride;
 
     if (!m_mem.open(sName, totalSize, true, bNew))
         return false;
@@ -87,7 +121,8 @@ bool memkv::create(const std::string &sName,
     }
     else if (*(int64_t*)(p + hv_count)      != nCount
              || *(int64_t*)(p + hv_maxNameLen)  != maxNameLen
-             || *(int64_t*)(p + hv_maxValueLen) != maxValueLen)
+             || *(int64_t*)(p + hv_maxValueLen) != maxValueLen
+             || totalSize > m_mem.size())
     {
         std::cout << "memkv::create: schema mismatch on existing share" << std::endl;
         close();
@@ -114,7 +149,9 @@ bool memkv::open(const std::string &sName)
     int64_t maxNameLen  = *(int64_t*)(p + hv_maxNameLen);
     int64_t maxValueLen = *(int64_t*)(p + hv_maxValueLen);
 
-    if (nCount <= 0 || maxNameLen <= 0 || maxValueLen <= 0)
+    int64_t slotStride = 0, totalSize = 0;
+    if (!calcLayout(nCount, maxNameLen, maxValueLen, slotStride, totalSize)
+        || totalSize > m_mem.size())
     {
         std::cout << "memkv::open: invalid schema" << std::endl;
         close();
@@ -123,7 +160,7 @@ bool memkv::open(const std::string &sName)
 
     m_maxNameLen  = maxNameLen;
     m_maxValueLen = maxValueLen;
-    m_slotStride  = 2 * sizeof(int64_t) + (maxNameLen + 1) + (maxValueLen + 1);
+    m_slotStride  = slotStride;
     return true;
 }
 

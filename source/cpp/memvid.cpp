@@ -1,8 +1,70 @@
 
 #include "libmembus-internal.h"
 
+#include <limits>
+
 namespace LIBMEMBUS_NS
 {
+
+namespace
+{
+    bool checkedAdd(int64_t a, int64_t b, int64_t &out)
+    {
+        if (a < 0 || b < 0 || a > std::numeric_limits<int64_t>::max() - b)
+            return false;
+        out = a + b;
+        return true;
+    }
+
+    bool checkedMul(int64_t a, int64_t b, int64_t &out)
+    {
+        if (a < 0 || b < 0 || (a != 0 && b > std::numeric_limits<int64_t>::max() / a))
+            return false;
+        out = a * b;
+        return true;
+    }
+
+    bool calcLayout(int64_t w, int64_t h, int64_t bpp, int64_t bufs,
+                    int64_t &sw, int64_t &blocksz, int64_t &total)
+    {
+        if (w <= 0 || h <= 0 || bpp != 24 || bufs <= 0)
+            return false;
+
+        int64_t bytesPerPixel = memvid::fitTo<int64_t>(bpp, 8);
+        int64_t payload = 0, blocks = 0;
+        if (!checkedMul(w, bytesPerPixel, sw)
+            || !checkedMul(sw, h, payload)
+            || !checkedAdd(memvid::fv_last, payload, blocksz)
+            || !checkedMul(blocksz, bufs, blocks)
+            || !checkedAdd(memvid::hv_last, blocks, total))
+            return false;
+
+        return true;
+    }
+
+    bool validateMappedLayout(char *p, int64_t mappedSize)
+    {
+        if (!p || mappedSize < memvid::hv_last)
+            return false;
+
+        int64_t size      = *(int64_t*)(p + memvid::hv_size);
+        int64_t width     = *(int64_t*)(p + memvid::hv_width);
+        int64_t height    = *(int64_t*)(p + memvid::hv_height);
+        int64_t scanWidth = *(int64_t*)(p + memvid::hv_scanwidth);
+        int64_t bpp       = *(int64_t*)(p + memvid::hv_bpp);
+        int64_t fps       = *(int64_t*)(p + memvid::hv_fps);
+        int64_t bufs      = *(int64_t*)(p + memvid::hv_bufs);
+        int64_t blocksz   = *(int64_t*)(p + memvid::hv_blocksz);
+        int64_t calcSw = 0, calcBlock = 0, calcTotal = 0;
+
+        return fps > 0
+            && calcLayout(width, height, bpp, bufs, calcSw, calcBlock, calcTotal)
+            && scanWidth == calcSw
+            && blocksz == calcBlock
+            && size == calcTotal
+            && size <= mappedSize;
+    }
+}
 
 memvid::vidview memvid::getBuf(int64_t idx) noexcept(false)
 {
@@ -241,13 +303,7 @@ bool memvid::open_existing(const std::string &sName)
     }
 
     // Validate critical header fields before trusting them for pointer arithmetic
-    int64_t *pSize    = (int64_t*)(p + hv_size);
-    int64_t *pWidth   = (int64_t*)(p + hv_width);
-    int64_t *pHeight  = (int64_t*)(p + hv_height);
-    int64_t *pBufs    = (int64_t*)(p + hv_bufs);
-    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
-
-    if (0 >= *pSize || 0 >= *pWidth || 0 >= *pHeight || 0 >= *pBufs || 0 >= *pBlockSz)
+    if (!validateMappedLayout(p, m_mem.size()))
     {
         close();
         return false;
@@ -262,18 +318,9 @@ bool memvid::open(const std::string &sName, bool bCreate, int64_t w, int64_t h,
 {
     close();
 
-    // Param check
-    if (0 >= w || 0 >= h || 24 != bpp || 0 >= fps || 0 >= bufs)
+    int64_t sw = 0, blocksz = 0, total = 0;
+    if (0 >= fps || !calcLayout(w, h, bpp, bufs, sw, blocksz, total))
         return false;
-
-    // Calculate scan width
-    int64_t sw = abs(w * fitTo<int64_t>(bpp, 8));
-
-    // Image block size
-    int64_t blocksz = fv_last + (sw * h);
-
-    // How much total memory do we need?
-    int64_t total = hv_last + (blocksz * bufs);
 
     // Try to open the memory share
     if (!m_mem.open(sName, total, bCreate, bCreate))
@@ -315,7 +362,8 @@ bool memvid::open(const std::string &sName, bool bCreate, int64_t w, int64_t h,
     }
 
     // Exists, so makes sure it matches what we expect
-    else if (*pSize != total
+    else if (!validateMappedLayout(p, m_mem.size())
+             || *pSize != total
              || *pWidth != w
              || *pHeight != h
              || *pScanWidth != sw

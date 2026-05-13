@@ -1,6 +1,6 @@
 # libmembus
 
-A C++20 shared memory data bus for inter-process communication. Provides raw memory maps, a message queue, and ring buffers for video and audio data — all backed by named POSIX shared memory with no broker process required.
+A C++20 shared memory data bus for inter-process communication. Provides raw memory maps, message and command channels, fixed-schema key-value state, and ring buffers for video and audio data — all backed by named shared memory with no broker process required.
 
 ## Table of Contents
 
@@ -9,7 +9,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - [Building](#building)
 - [Installation](#installation)
 - [Design Model](#design-model)
-  - [Single writer, multiple readers](#single-writer-multiple-readers)
+  - [Ownership and reader model](#ownership-and-reader-model)
   - [Overrun detection and resync](#overrun-detection-and-resync)
   - [Writer restart detection](#writer-restart-detection)
   - [Reader lifecycle](#reader-lifecycle)
@@ -22,6 +22,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
   - [memcmd — command channel](#memcmd--command-channel)
   - [memkv — key-value store](#memkv--key-value-store)
   - [sys — signal handling](#sys--signal-handling)
+- [Comparison to Similar Projects](#comparison-to-similar-projects)
 - [License](#license)
 
 ---
@@ -34,18 +35,19 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - **`memaud`** — lock-free multi-buffer audio ring buffer (8-bit or 16-bit PCM) with overrun detection
 - **`memcmd`** — multi-producer, multi-consumer broadcast command channel with overrun detection
 - **`memkv`** — fixed-schema key-value store; lock-free seqlock reads, atomic batch writes, change notifications
-- POSIX and Windows support
-- Header-only API, single `#include`
-- C++20, no exceptions required at call sites
+- Single public include, compiled library implementation
+- C++20, bool-returning open/write APIs
+- Defensive validation of shared-memory headers before attaching to existing structured shares
 
 ---
 
 ## Requirements
 
 - CMake 3.30+
-- C++20 compiler (GCC, Clang, MSVC)
+- C++20 compiler
 - Ninja (recommended) or Make
 - Boost (`stacktrace_backtrace` component, plus Boost.Interprocess and Boost.DateTime)
+- POSIX-style named shared memory is the primary tested target. The process-boundary smoke test is enabled on Unix-like platforms.
 
 ---
 
@@ -72,6 +74,9 @@ ctest --test-dir ./build -R "MemMap"
 ctest --test-dir ./build -R "MessageQueue"
 ctest --test-dir ./build -R "MemVid"
 ctest --test-dir ./build -R "MemAud"
+ctest --test-dir ./build -R "MemCmd"
+ctest --test-dir ./build -R "MemKV"
+ctest --test-dir ./build -R "ipc_smoke"
 ```
 
 ---
@@ -88,9 +93,11 @@ Installs the library to `lib/` and headers to `include/`.
 
 ## Design Model
 
-### Single writer, multiple readers
+### Ownership and reader model
 
-Every share has exactly one writer process and any number of reader processes. The writer creates the share; readers attach to it. Readers never need to coordinate with each other.
+The process that creates a share owns its OS namespace entry and removes it on `close()`. Processes that attach to an existing share do not remove it on close.
+
+`memvid`, `memaud`, and `memmsg` are designed around one publishing writer and any number of independent readers. Readers never need to coordinate with each other.
 
 ```
 Writer process                  Reader process A
@@ -105,6 +112,8 @@ Writer process                  Reader process A
 **`memvid` and `memaud`** use a fully lock-free ring buffer. The writer advances an atomic pointer via `next()`; readers observe that pointer and the per-frame sequence numbers independently without any synchronisation between readers.
 
 **`memmsg`** uses an interprocess mutex and condition variable so readers can block-wait for messages. All readers share the same mutex but each maintains its own private read position, so every reader receives every message independently (broadcast, not work-stealing).
+
+`memcmd` intentionally supports multiple writers and multiple registered readers. `memkv` allows any open handle to write values after the owner has created the fixed schema.
 
 ### Overrun detection and resync
 
@@ -145,7 +154,7 @@ while (running)
     // ... process frame.m_ptr ...
 
     rLastSeq = vid.getFrameSeq(rPos);
-    rPos     = vid.getPtr(rPos + 1);
+    rPos     = (rPos + 1) % vid.getBufs();
 }
 ```
 
@@ -296,6 +305,8 @@ char* ptr = writer.data();  // raw pointer
 
 The process that created the share (`existing() == false`) owns it and removes it from the namespace on `close()`. Processes that attached to an existing share (`existing() == true`) do not remove it on close.
 
+Opening an existing share with `bCreate=true` does not resize it. `nSize` is used to size newly-created shares; attached handles report the actual mapped size via `size()`.
+
 ---
 
 ### memmsg — message queue
@@ -330,6 +341,7 @@ std::string msg2 = rx.read(0);
 
 Notes:
 - Both sides must open with the same `size` or the attach will fail.
+- Attach also fails if an existing share is too small for the requested queue layout.
 - The internal mutex is acquired with a 5-second timeout; if the writer crashes holding the lock, readers will surface an error rather than blocking forever.
 
 ---
@@ -363,6 +375,8 @@ mmb::memvid::vidview frame = consumer.getBuf(rPos);
 // frame.m_sw   — scan width (bytes per row)
 // frame.m_size — total bytes (m_sw * m_h)
 ```
+
+`open_existing()` validates the header and rejects malformed or undersized shares before exposing buffer views.
 
 **Pointer and sequence helpers:**
 
@@ -415,6 +429,8 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 // buf.m_bps  — bits per sample
 ```
 
+`open_existing()` validates the header and rejects malformed or undersized shares before exposing buffer views.
+
 **Metadata:**
 
 | Method | Description |
@@ -465,6 +481,7 @@ if (cmd.open("/cam_commands", 4096))
 | `bCreate` | Create the share if it does not exist; default `false` |
 
 The process that creates the share owns it and removes it from the OS namespace on `close()`. Both sides must open with the same `size` or the attach will fail.
+Attach also fails if an existing share is too small for the requested command-channel layout.
 
 **`write(msg)`** — returns `false` if the payload is empty, too large for the buffer, or the mutex could not be acquired within 5 seconds (crash recovery).
 
@@ -502,26 +519,26 @@ kv.setValue("pan", "-15");
 kv.setAll({{"pan", "-15"}, {"tilt", "5"}, {"zoom", "1.4"}});
 
 // Any other process
-mmb::memkv kv;
-kv.open("/cam_state");
+mmb::memkv reader;
+reader.open("/cam_state");
 
 // Lock-free read
-std::string pan = kv.getValue("pan");
+std::string pan = reader.getValue("pan");
 
 // Consistent snapshot of all entries
-auto all = kv.getAll();
+auto all = reader.getAll();
 
 // Poll for changes (non-blocking)
-int64_t epoch = kv.getEpoch();
-auto changed = kv.getChanged(epoch);    // returns map of changed entries, updates epoch
+int64_t epoch = reader.getEpoch();
+auto changed = reader.getChanged(epoch);    // returns map of changed entries, updates epoch
 
 // Wait for changes (blocking)
-auto changed = kv.getChanged(100, epoch);   // blocks up to 100 ms
+changed = reader.getChanged(100, epoch);    // blocks up to 100 ms
 ```
 
 **`create(sName, count, maxNameLen, maxValueLen, bNew=false)`** — creates the share; optionally removes any stale share first with `bNew=true`.
 
-**`open(sName)`** — attaches to an existing share. Reads schema (count, name/value limits) from the header.
+**`open(sName)`** — attaches to an existing share. Reads schema (count, name/value limits) from the header and rejects malformed or undersized layouts.
 
 **`setName(idx, name)`** — sets the immutable name for slot `idx`. Call only before other processes attach.
 
@@ -557,6 +574,146 @@ while (!ctrl_c_count)
 ```
 
 `ctrl_c_count` is incremented each time Ctrl-C is pressed. After three presses the process exits immediately.
+
+---
+
+## Comparison to Similar Projects
+
+Several projects solve shared-memory IPC in different ways. The right choice depends on whether you need a small embeddable C++ library, a full middleware stack, durable queues, or low-level shared-memory primitives.
+
+---
+
+### Boost.Interprocess
+
+Boost.Interprocess is the closest low-level foundation. It provides shared memory, mapped files, named synchronization primitives, process-shared mutexes and condition variables, message queues, and shared-memory allocators/containers.
+
+Key differences:
+
+- Boost.Interprocess is a general-purpose toolkit. libmembus is a higher-level set of fixed IPC patterns built on Boost.Interprocess-style primitives.
+- Boost.Interprocess gives you raw mechanisms; you design your own message framing, overrun handling, restart detection, and media/state layouts.
+- libmembus provides ready-made `memmsg`, `memcmd`, `memvid`, `memaud`, and `memkv` abstractions with tests for process-boundary behavior.
+- Boost.Interprocess is more flexible and portable; libmembus is smaller and more opinionated.
+
+Choose Boost.Interprocess if you need maximum control over the shared-memory layout or want STL-like containers and allocators in shared memory.
+
+Choose libmembus if you want a compact library with predefined message, command, media-ring, and key-value patterns.
+
+---
+
+### cpp-ipc / libipc
+
+cpp-ipc is a high-performance C++ IPC library using shared memory and circular buffers. It supports single-writer/multi-reader routes and multi-reader/multi-writer channels with broadcast-style delivery.
+
+Key differences:
+
+- cpp-ipc is closest to `memmsg` and `memcmd`: shared-memory channels, circular buffers, timeouts, and broadcast delivery.
+- cpp-ipc is more focused on generic message channels. libmembus also includes typed-ish domain buffers for video, audio, and fixed-schema key-value state.
+- cpp-ipc has broader packaged ecosystem support through package managers such as vcpkg and Conan.
+- libmembus currently has a smaller API surface and fewer dependencies beyond Boost.
+
+Choose cpp-ipc if you mainly need high-performance generic IPC channels across several platforms.
+
+Choose libmembus if your application also needs shared video/audio frame rings or simple shared process state.
+
+---
+
+### Eclipse iceoryx
+
+Eclipse iceoryx is a true zero-copy shared-memory IPC middleware designed for high-throughput publish/subscribe systems, especially robotics, automotive, and real-time applications.
+
+Key differences:
+
+- iceoryx is middleware with service discovery, publishers/subscribers, and integration paths for larger ecosystems such as ROS 2 and AUTOSAR Adaptive.
+- libmembus is a small library with named shares and no daemon, discovery service, or framework-level routing.
+- iceoryx is designed for large zero-copy data flows and stricter safety-oriented environments.
+- libmembus is easier to inspect and embed when a few named local process channels are enough.
+
+Choose iceoryx if you need a production middleware layer, discovery, many publishers/subscribers, and strong zero-copy semantics.
+
+Choose libmembus if you want direct named shared-memory channels with minimal infrastructure.
+
+---
+
+### Eclipse eCAL
+
+Eclipse eCAL is a communication middleware with publish/subscribe, client/server, shared-memory transport, network transports, recording/replay tools, and multiple language bindings.
+
+Key differences:
+
+- eCAL supports interprocess and interhost communication. libmembus is local shared-memory IPC.
+- eCAL includes tooling, message protocol support, and a larger runtime model.
+- libmembus has no broker, recorder, network transport, or schema framework.
+- eCAL is a better fit for distributed systems; libmembus is a better fit for local process coordination.
+
+Choose eCAL if you need a full communication abstraction layer with tooling, network support, and multi-language integration.
+
+Choose libmembus if all communication is local and you want simple named shared-memory objects.
+
+---
+
+### Flow-IPC
+
+Flow-IPC is a modern C++ toolkit for high-speed IPC, including zero-copy data sharing, message queues, sessions, and structured serialization-oriented workflows.
+
+Key differences:
+
+- Flow-IPC is a broader toolkit with session management and more infrastructure around transmission of data structures.
+- libmembus exposes simpler fixed abstractions and leaves lifecycle orchestration to the application.
+- Flow-IPC is more appropriate when IPC is a major architectural layer.
+- libmembus is more appropriate when IPC should stay as a small utility library.
+
+Choose Flow-IPC if you need a comprehensive C++ IPC toolkit with session-oriented design and zero-copy object transfer.
+
+Choose libmembus if you need a small set of practical shared-memory building blocks.
+
+---
+
+### Chronicle Queue
+
+Chronicle Queue is a memory-mapped, persisted, low-latency messaging system. It is log-oriented: messages are recorded and can be replayed.
+
+Key differences:
+
+- Chronicle Queue is durable and replayable. libmembus is volatile shared memory; data disappears when the owning share is removed.
+- Chronicle Queue is built around append-only queues and persistence to disk.
+- libmembus is built around live shared state, ring buffers, and latest-data delivery.
+- Chronicle Queue is useful when auditability or replay matters; libmembus is useful when live low-overhead sharing matters.
+
+Choose Chronicle Queue if you need persistent IPC, replay, or a durable event log.
+
+Choose libmembus if you only need live local shared memory with no persistence layer.
+
+---
+
+### libsharedmemory
+
+libsharedmemory is a small cross-platform C++ wrapper for low-level shared-memory buffers.
+
+Key differences:
+
+- libsharedmemory is closest to `memmap`: raw shared-memory access with a small API.
+- libmembus adds higher-level protocols on top of raw mapping: message queues, command channels, media rings, and key-value state.
+- libsharedmemory is smaller if raw mapped bytes are all you need.
+- libmembus carries more behavior and therefore more assumptions.
+
+Choose libsharedmemory if your application already owns the protocol and only needs a shared-memory wrapper.
+
+Choose libmembus if you want reusable IPC patterns rather than only a mapped byte span.
+
+---
+
+### Summary
+
+| Project | Best fit | Brokerless local SHM | Message channels | Media rings | Key-value state | Persistence | Middleware/tooling |
+|---|---|---:|---:|---:|---:|---:|---:|
+| libmembus | Small local C++ IPC with fixed patterns | Yes | Yes | Yes | Yes | No | No |
+| Boost.Interprocess | Low-level shared-memory primitives | Yes | Yes | No | Build yourself | No | No |
+| cpp-ipc | High-performance generic IPC channels | Yes | Yes | No | No | No | No |
+| iceoryx | Zero-copy pub/sub middleware | Yes | Pub/sub | Generic payloads | No | No | Yes |
+| eCAL | Distributed pub/sub and tooling | Uses SHM locally | Pub/sub | Generic payloads | No | Recording support | Yes |
+| Flow-IPC | Full C++ IPC toolkit | Yes | Yes | Generic payloads | No | No | Some |
+| Chronicle Queue | Durable low-latency event log | Memory-mapped files | Queue/log | No | No | Yes | Some |
+| libsharedmemory | Raw shared-memory wrapper | Yes | Build yourself | Build yourself | Build yourself | No | No |
 
 ---
 

@@ -1,6 +1,8 @@
 
 #include "libmembus-internal.h"
 
+#include <limits>
+
 namespace LIBMEMBUS_NS
 {
 
@@ -26,6 +28,17 @@ enum FrameHeaderVal
 /// Minimum buffer overhead
 const int64_t c_minOverhead = hv_last + (2 * fv_last);
 
+namespace
+{
+    bool checkedBackingSize(int64_t size, int64_t &backingSize)
+    {
+        if (size <= 0 || size > std::numeric_limits<int64_t>::max() - c_minOverhead)
+            return false;
+        backingSize = size + c_minOverhead;
+        return true;
+    }
+}
+
 void memmsg::close()
 {
     // char *p = m_mem.data();
@@ -46,12 +59,12 @@ bool memmsg::open(const std::string &sName, int64_t size, bool bWrite, bool bCre
 {
     close();
 
-    // Check params
-    if (0 >= size)
+    int64_t backingSize = 0;
+    if (!checkedBackingSize(size, backingSize))
         return false;
 
     // Try to open the memory share
-    if (!m_mem.open(sName, size + c_minOverhead, bCreate, false))
+    if (!m_mem.open(sName, backingSize, bCreate, false))
     {
         close();
         return false;
@@ -61,6 +74,12 @@ bool memmsg::open(const std::string &sName, int64_t size, bool bWrite, bool bCre
 
     char *p = m_mem.data();
     if (!p)
+    {
+        close();
+        return false;
+    }
+
+    if (m_mem.size() < backingSize)
     {
         close();
         return false;

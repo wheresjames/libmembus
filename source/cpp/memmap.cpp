@@ -15,6 +15,7 @@ struct memmap_data
 
 memmap::memmap()
 {
+    m_size = 0;
     m_bExisting = false;
     _d = new memmap_data();
 }
@@ -29,16 +30,19 @@ memmap::~memmap()
 
 char* memmap::data()
 {
-    return (char*)(_d->m_map.get() ? _d->m_map->get_address() : 0);
+    return (char*)(_d && _d->m_map.get() ? _d->m_map->get_address() : 0);
 }
 
 bool memmap::isOpen()
 {
-    return _d->m_map.get() ? true : false;
+    return _d && _d->m_map.get() ? true : false;
 }
 
 void memmap::close()
 {
+    if (!_d)
+        return;
+
     // Remove share if needed
     if (_d->m_mem.get() && !m_bExisting && 0 < m_sName.length())
         _d->m_mem->remove(m_sName.c_str());
@@ -59,7 +63,10 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
 
     // Delete any existing share if we're creating
     if (bCreate && bNew)
-        shared_memory_object().remove(sName.c_str());
+    {
+        try { shared_memory_object().remove(sName.c_str()); }
+        catch(...) {}
+    }
 
     // Try to open existing share
     bool bFail = false;
@@ -84,12 +91,20 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
         return false;
     }
 
-    // Set size?
-    if (bCreate && 0 < nSize)
-        _d->m_mem->truncate(nSize);
+    try
+    {
+        // Size newly-created shares only.  Attaching must never resize a live share.
+        if (!m_bExisting && 0 < nSize)
+            _d->m_mem->truncate(nSize);
 
-    // Map the region
-    _d->m_map.reset(new mapped_region(*_d->m_mem, read_write));
+        // Map the region
+        _d->m_map.reset(new mapped_region(*_d->m_mem, read_write));
+    }
+    catch(...)
+    {
+        close();
+        return false;
+    }
 
     // Use the actual mapped size, not the caller-supplied nSize, so that
     // reads/writes are bounded by reality when attaching to an existing share.

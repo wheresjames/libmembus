@@ -1,6 +1,8 @@
 
 #include "libmembus-internal.h"
 
+#include <limits>
+
 namespace LIBMEMBUS_NS
 {
 
@@ -30,6 +32,14 @@ namespace
     // Extra bytes allocated beyond the caller-requested size so sentinel
     // and next-slot writes never go out of bounds.
     const int64_t c_minOverhead = hv_last + (2 * fv_last);
+
+    bool checkedBackingSize(int64_t size, int64_t &backingSize)
+    {
+        if (size <= 0 || size > std::numeric_limits<int64_t>::max() - c_minOverhead)
+            return false;
+        backingSize = size + c_minOverhead;
+        return true;
+    }
 }
 
 
@@ -50,10 +60,11 @@ bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCr
 {
     close();
 
-    if (0 >= size)
+    int64_t backingSize = 0;
+    if (!checkedBackingSize(size, backingSize))
         return false;
 
-    if (!m_mem.open(sName, size + c_minOverhead, bCreate, false))
+    if (!m_mem.open(sName, backingSize, bCreate, false))
     {
         close();
         return false;
@@ -61,6 +72,12 @@ bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCr
 
     char *p = m_mem.data();
     if (!p)
+    {
+        close();
+        return false;
+    }
+
+    if (m_mem.size() < backingSize)
     {
         close();
         return false;
