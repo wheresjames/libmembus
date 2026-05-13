@@ -53,6 +53,9 @@ public:
     */
     bool open(const std::string &sName, int64_t size, bool bWrite, bool bCreate);
 
+    /// Remove a stale queue from the OS namespace
+    static bool remove(const std::string &sName) { return memmap::remove(sName); }
+
     /** Close image share
 
     */
@@ -82,6 +85,12 @@ public:
         @returns Non-zero if memory share already existed.
     */
     bool existing() { return m_mem.existing(); }
+
+    /// Returns true if a share is open.
+    bool isOpen() { return m_mem.isOpen(); }
+
+    /// Session ID written when the queue was created.
+    int64_t getSessionId();
 
 private:
 

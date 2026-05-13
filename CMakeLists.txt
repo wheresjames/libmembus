@@ -77,6 +77,13 @@ add_subdirectory(source)
 enable_testing()
 add_subdirectory(test)
 
+#-------------------------------------------------------------
+# Add examples
+option(LIBMEMBUS_BUILD_EXAMPLES "Build libmembus examples" ON)
+if (LIBMEMBUS_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
 
 #-------------------------------------------------------------
 # Install library and headers
@@ -90,4 +97,3 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
         DESTINATION include
         FILES_MATCHING PATTERN "*.h"
     )
-

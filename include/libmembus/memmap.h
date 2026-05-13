@@ -21,6 +21,9 @@ public:
     /// Open a shared memory space
     bool open(const std::string &sName, int64_t nSize, bool bCreate = false, bool bNew = false);
 
+    /// Remove a shared memory object from the OS namespace
+    static bool remove(const std::string &sName);
+
     /// Write string to buffer
     int64_t write(const std::string &sStr);
 

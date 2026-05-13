@@ -34,5 +34,5 @@ namespace LIBMEMBUS_NS
 #include "libmembus/memaud.h"
 #include "libmembus/memcmd.h"
 #include "libmembus/memkv.h"
-
+#include "libmembus/helpers.h"
 

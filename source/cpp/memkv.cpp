@@ -14,7 +14,8 @@ namespace
         hv_maxNameLen  = 1 * sizeof(int64_t),
         hv_maxValueLen = 2 * sizeof(int64_t),
         hv_epoch       = 3 * sizeof(int64_t),
-        hv_mutex       = 4 * sizeof(int64_t),
+        hv_id          = 4 * sizeof(int64_t),
+        hv_mutex       = 5 * sizeof(int64_t),
         hv_cond        = hv_mutex + sizeof(interprocess_mutex),
         hv_last        = hv_cond  + sizeof(interprocess_condition)
     };
@@ -98,11 +99,15 @@ bool memkv::create(const std::string &sName,
                    int64_t nCount, int64_t maxNameLen, int64_t maxValueLen,
                    bool bNew)
 {
+    set_last_error(errc::ok);
     close();
 
     int64_t slotStride = 0, totalSize = 0;
     if (!calcLayout(nCount, maxNameLen, maxValueLen, slotStride, totalSize))
+    {
+        set_last_error(errc::invalid_argument);
         return false;
+    }
 
     if (!m_mem.open(sName, totalSize, true, bNew))
         return false;
@@ -116,6 +121,7 @@ bool memkv::create(const std::string &sName,
         *(int64_t*)(p + hv_maxNameLen)  = maxNameLen;
         *(int64_t*)(p + hv_maxValueLen) = maxValueLen;
         *(int64_t*)(p + hv_epoch)       = 0;
+        *(int64_t*)(p + hv_id)          = (int64_t)std::mt19937_64(std::random_device{}())();
         new ((interprocess_mutex*)    (p + hv_mutex)) interprocess_mutex();
         new ((interprocess_condition*)(p + hv_cond))  interprocess_condition();
     }
@@ -126,21 +132,27 @@ bool memkv::create(const std::string &sName,
     {
         std::cout << "memkv::create: schema mismatch on existing share" << std::endl;
         close();
+        set_last_error(errc::size_mismatch);
         return false;
     }
 
     m_maxNameLen  = maxNameLen;
     m_maxValueLen = maxValueLen;
     m_slotStride  = slotStride;
+    set_last_error(errc::ok);
     return true;
 }
 
 bool memkv::open(const std::string &sName)
 {
+    set_last_error(errc::ok);
     close();
 
     if (!m_mem.open(sName, 0, false))
+    {
+        set_last_error(errc::open_failed);
         return false;
+    }
 
     char *p = m_mem.data();
     if (!p) { close(); return false; }
@@ -155,12 +167,14 @@ bool memkv::open(const std::string &sName)
     {
         std::cout << "memkv::open: invalid schema" << std::endl;
         close();
+        set_last_error(errc::invalid_layout);
         return false;
     }
 
     m_maxNameLen  = maxNameLen;
     m_maxValueLen = maxValueLen;
     m_slotStride  = slotStride;
+    set_last_error(errc::ok);
     return true;
 }
 
@@ -211,8 +225,8 @@ bool memkv::setValue(int64_t idx, const std::string &value)
     char *p = m_mem.data();
     if (!p) return false;
 
-    if (idx < 0 || idx >= *(int64_t*)(p + hv_count)) return false;
-    if ((int64_t)value.length() > m_maxValueLen) return false;
+    if (idx < 0 || idx >= *(int64_t*)(p + hv_count)) { set_last_error(errc::invalid_argument); return false; }
+    if ((int64_t)value.length() > m_maxValueLen) { set_last_error(errc::message_too_large); return false; }
 
     auto *pMutex  = (interprocess_mutex*)(p + hv_mutex);
     auto *pCond   = (interprocess_condition*)(p + hv_cond);
@@ -220,12 +234,13 @@ bool memkv::setValue(int64_t idx, const std::string &value)
 
     scoped_lock<interprocess_mutex> lk(*pMutex,
         boost::get_system_time() + boost::posix_time::milliseconds(5000));
-    if (!lk) return false;
+    if (!lk) { set_last_error(errc::lock_timeout); return false; }
 
     int64_t newEpoch = *pEpoch + 1;
     writeSlotLocked(p, idx, value, newEpoch);
     *pEpoch = newEpoch;
     pCond->notify_all();
+    set_last_error(errc::ok);
     return true;
 }
 
@@ -246,7 +261,7 @@ bool memkv::setAll(const std::map<std::string, std::string> &values)
 
     scoped_lock<interprocess_mutex> lk(*pMutex,
         boost::get_system_time() + boost::posix_time::milliseconds(5000));
-    if (!lk) return false;
+    if (!lk) { set_last_error(errc::lock_timeout); return false; }
 
     int64_t newEpoch = *pEpoch + 1;
 
@@ -260,6 +275,7 @@ bool memkv::setAll(const std::map<std::string, std::string> &values)
 
     *pEpoch = newEpoch;
     pCond->notify_all();
+    set_last_error(errc::ok);
     return true;
 }
 
@@ -408,6 +424,13 @@ int64_t memkv::getEpoch()
     if (!p) return -1;
     return std::atomic_ref<int64_t>(*(int64_t*)(p + hv_epoch))
                .load(std::memory_order_acquire);
+}
+
+int64_t memkv::getSessionId()
+{
+    char *p = m_mem.data();
+    if (!p) return 0;
+    return *(int64_t*)(p + hv_id);
 }
 
 

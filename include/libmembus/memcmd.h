@@ -57,6 +57,9 @@ public:
     bool open(const std::string &sName, int64_t size,
               bool bReader = false, bool bCreate = false);
 
+    /// Remove a stale command channel from the OS namespace.
+    static bool remove(const std::string &sName) { return memmap::remove(sName); }
+
     /// Close the channel and release all resources.
     void close();
 
@@ -89,6 +92,9 @@ public:
         close().
     */
     int64_t readerCount();
+
+    /// Session ID written when the channel was created.
+    int64_t getSessionId();
 
     /// Returns true if the channel is open.
     bool isOpen() { return m_mem.isOpen(); }

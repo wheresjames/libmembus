@@ -18,6 +18,7 @@ memmap::memmap()
     m_size = 0;
     m_bExisting = false;
     _d = new memmap_data();
+    set_last_error(errc::ok);
 }
 
 memmap::~memmap()
@@ -58,6 +59,8 @@ void memmap::close()
 
 bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bNew)
 {
+    set_last_error(errc::ok);
+
     // Out with the old
     close();
 
@@ -73,7 +76,7 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
     try
     {   m_bExisting = true;
         _d->m_mem.reset(new shared_memory_object(open_only, sName.c_str(), read_write));
-    } catch(...) { bFail = true; }
+    } catch(...) { bFail = true; set_last_error(errc::open_failed); }
 
     // Did we get anything?
     if (bFail && bCreate)
@@ -82,7 +85,7 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
         try
         {   m_bExisting = false;
             _d->m_mem.reset(new shared_memory_object(create_only, sName.c_str(), read_write));
-        } catch(...) { bFail = true; }
+        } catch(...) { bFail = true; set_last_error(errc::create_failed); }
     }
 
     // If we failed
@@ -103,6 +106,7 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
     catch(...)
     {
         close();
+        set_last_error(errc::map_failed);
         return false;
     }
 
@@ -111,17 +115,38 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
     m_size = (int64_t)_d->m_map->get_size();
     m_sName = sName;
 
+    set_last_error(errc::ok);
     return true;
+}
+
+bool memmap::remove(const std::string &sName)
+{
+    set_last_error(errc::ok);
+    try
+    {
+        return shared_memory_object().remove(sName.c_str());
+    }
+    catch(...)
+    {
+        set_last_error(errc::open_failed);
+        return false;
+    }
 }
 
 int64_t memmap::write(const std::string &sStr)
 {
     if (0 >= m_size)
+    {
+        set_last_error(errc::not_open);
         return 0;
+    }
 
     char *p = data();
     if (!p)
+    {
+        set_last_error(errc::not_open);
         return 0;
+    }
 
     int64_t len = sStr.length();
     if (len > m_size)
@@ -130,22 +155,30 @@ int64_t memmap::write(const std::string &sStr)
     if (0 < len)
         memcpy(p, sStr.c_str(), len);
 
+    set_last_error(errc::ok);
     return len;
 }
 
 std::string memmap::read(int64_t sz)
 {
     if (0 >= m_size)
+    {
+        set_last_error(errc::not_open);
         return std::string();
+    }
 
     char *p = data();
     if (!p)
+    {
+        set_last_error(errc::not_open);
         return std::string();
+    }
 
     int64_t len = size();
     if (0 < sz && len > sz)
         len = sz;
 
+    set_last_error(errc::ok);
     return std::string(p, len);
 }
 

@@ -13,6 +13,44 @@
 namespace LIBMEMBUS_NS
 {
 
+static thread_local errc g_last_error = errc::ok;
+
+void set_last_error(errc e)
+{
+    g_last_error = e;
+}
+
+errc last_error()
+{
+    return g_last_error;
+}
+
+const char *last_error_message(errc e)
+{
+    switch (e)
+    {
+    case errc::ok:                return "ok";
+    case errc::invalid_argument:  return "invalid argument";
+    case errc::open_failed:       return "open failed";
+    case errc::create_failed:     return "create failed";
+    case errc::map_failed:        return "map failed";
+    case errc::size_mismatch:     return "size mismatch";
+    case errc::invalid_layout:    return "invalid shared-memory layout";
+    case errc::not_open:          return "not open";
+    case errc::access_denied:     return "access denied";
+    case errc::message_too_large: return "message too large";
+    case errc::lock_timeout:      return "lock timeout";
+    case errc::timeout:           return "timeout";
+    case errc::overrun:           return "overrun";
+    }
+    return "unknown error";
+}
+
+const char *last_error_message()
+{
+    return last_error_message(last_error());
+}
+
 static volatile int *g_fCount = 0;
 static void ctrl_c_handler(int /*s*/)
 {

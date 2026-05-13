@@ -1,7 +1,9 @@
 
 #include "libmembus-internal.h"
 
+#include <chrono>
 #include <limits>
+#include <thread>
 
 namespace LIBMEMBUS_NS
 {
@@ -178,6 +180,27 @@ int64_t memvid::next(int64_t inc)
     }
 
     return setPtr(cur + inc);
+}
+
+bool memvid::waitForFrame(uint64_t wait_ms, int64_t lastSeq)
+{
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(wait_ms);
+    do
+    {
+        if (getSeq() > lastSeq)
+        {
+            set_last_error(errc::ok);
+            return true;
+        }
+
+        if (wait_ms == 0)
+            break;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+
+    set_last_error(errc::timeout);
+    return false;
 }
 
 int64_t memvid::getSessionId()

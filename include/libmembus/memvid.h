@@ -132,6 +132,9 @@ public:
     /// Open an existing image share
     bool open_existing(const std::string &sName);
 
+    /// Remove a stale video share from the OS namespace
+    static bool remove(const std::string &sName) { return memmap::remove(sName); }
+
     /// Close image share
     void close();
 
@@ -161,6 +164,9 @@ public:
 
     /// Increment pointer by inc
     int64_t next(int64_t inc);
+
+    /// Wait until getSeq() advances beyond lastSeq, or timeout expires.
+    bool waitForFrame(uint64_t wait_ms, int64_t lastSeq);
 
     /// Image width
     int64_t getWidth();

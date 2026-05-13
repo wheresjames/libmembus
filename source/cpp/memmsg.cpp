@@ -12,7 +12,8 @@ enum HeaderVal
     hv_size         = 0,
     hv_write        = hv_size   + sizeof(int64_t),
     hv_seq          = hv_write  + sizeof(int64_t),   // monotonic write-sequence counter
-    hv_mutex        = hv_seq    + sizeof(int64_t),
+    hv_id           = hv_seq    + sizeof(int64_t),   // random session ID
+    hv_mutex        = hv_id     + sizeof(int64_t),
     hv_cond         = hv_mutex  + sizeof(interprocess_mutex),
     hv_last         = hv_cond   + sizeof(interprocess_condition)
 };
@@ -57,16 +58,21 @@ void memmsg::close()
 
 bool memmsg::open(const std::string &sName, int64_t size, bool bWrite, bool bCreate)
 {
+    set_last_error(errc::ok);
     close();
 
     int64_t backingSize = 0;
     if (!checkedBackingSize(size, backingSize))
+    {
+        set_last_error(errc::invalid_argument);
         return false;
+    }
 
     // Try to open the memory share
     if (!m_mem.open(sName, backingSize, bCreate, false))
     {
         close();
+        set_last_error(errc::open_failed);
         return false;
     }
 
@@ -76,12 +82,14 @@ bool memmsg::open(const std::string &sName, int64_t size, bool bWrite, bool bCre
     if (!p)
     {
         close();
+        set_last_error(errc::not_open);
         return false;
     }
 
     if (m_mem.size() < backingSize)
     {
         close();
+        set_last_error(errc::invalid_layout);
         return false;
     }
 
@@ -98,17 +106,20 @@ bool memmsg::open(const std::string &sName, int64_t size, bool bWrite, bool bCre
         *pSize  = size;
         *pWrite = 0;
         *pSeq   = 0;
+        *(int64_t*)(p + hv_id) = (int64_t)std::mt19937_64(std::random_device{}())();
         new (pMutex) interprocess_mutex();
         new (pCond) interprocess_condition();
     }
     else if (*pSize != size)
     {   std::cout << "Size mismatch : " << *pSize << " != " << size << std::endl;
         close();
+        set_last_error(errc::size_mismatch);
         return false;
     }
     // else
     //     m_nRead = *pWrite;
 
+    set_last_error(errc::ok);
     return true;
 }
 
@@ -116,12 +127,14 @@ bool memmsg::write(const std::string &sMsg)
 {
     if (!m_bWrite)
     {   std::cout << "No write access" << std::endl;
+        set_last_error(errc::access_denied);
         return false;
     }
 
     char *p = m_mem.data();
     if (!p)
     {   std::cout << "Invalid buffer" << std::endl;
+        set_last_error(errc::not_open);
         return false;
     }
 
@@ -137,6 +150,7 @@ bool memmsg::write(const std::string &sMsg)
     int64_t len = sMsg.length();
     if (0 >= len || len >= *pSize)
     {   std::cout << "Invalid length : " << len << " : max : " << *pSize << std::endl;
+        set_last_error(len <= 0 ? errc::invalid_argument : errc::message_too_large);
         return false;
     }
 
@@ -147,6 +161,7 @@ bool memmsg::write(const std::string &sMsg)
             boost::get_system_time() + boost::posix_time::milliseconds(5000));
         if (!lk)
         {   std::cout << "memmsg::write failed to acquire lock" << std::endl;
+            set_last_error(errc::lock_timeout);
             return false;
         }
 
@@ -177,6 +192,7 @@ bool memmsg::write(const std::string &sMsg)
         pCond->notify_all();
     }
 
+    set_last_error(errc::ok);
     return true;
 }
 
@@ -187,6 +203,7 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
     char *p = m_mem.data();
     if (!p)
     {   std::cout << "Invalid buffer" << std::endl;
+        set_last_error(errc::not_open);
         return std::string();
     }
 
@@ -205,6 +222,7 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
         boost::get_system_time() + boost::posix_time::milliseconds(5000));
     if (!lk)
     {   std::cout << "memmsg::read failed to acquire lock" << std::endl;
+        set_last_error(errc::lock_timeout);
         return std::string();
     }
 
@@ -216,13 +234,22 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
     if (m_nRead == *pWrite)
     {
         if (0 >= wait)
+        {
+            set_last_error(errc::timeout);
             return std::string();
+        }
 
         if (!pCond->timed_wait(lk, boost::get_system_time() + boost::posix_time::milliseconds(wait)))
+        {
+            set_last_error(errc::timeout);
             return std::string();
+        }
 
         if (m_nRead == *pWrite)
+        {
+            set_last_error(errc::timeout);
             return std::string();
+        }
     }
 
     // Validate length; check len before adding m_nRead to avoid integer overflow
@@ -239,6 +266,7 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
         if (0 >= len || len > *pSize - m_nRead)
         {
             std::cout << "Invalid length : " << m_nRead << " : " << len << " : " << *pSize << " : " << *pWrite << std::endl;
+            set_last_error(errc::invalid_layout);
             return std::string();
         }
     }
@@ -251,6 +279,7 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
         m_nRead    = *pWrite;
         m_nLastSeq = *pSeq;
         if (pOverrun) *pOverrun = true;
+        set_last_error(errc::overrun);
         return std::string();
     }
 
@@ -258,7 +287,16 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
     m_nRead    += fv_last + len;
     m_nLastSeq  = frame_seq;
 
+    set_last_error(errc::ok);
     return val;
+}
+
+int64_t memmsg::getSessionId()
+{
+    char *p = m_mem.data();
+    if (!p)
+        return 0;
+    return *(int64_t*)(p + hv_id);
 }
 
 }; // end namespace

@@ -48,6 +48,9 @@ public:
                 int64_t count, int64_t maxNameLen, int64_t maxValueLen,
                 bool bNew = false);
 
+    /** Remove a stale key-value store from the OS namespace. */
+    static bool remove(const std::string &sName) { return memmap::remove(sName); }
+
     /** Attach to an existing share without taking ownership.
      *  Returns false if no share exists. */
     bool open(const std::string &sName);
@@ -98,6 +101,9 @@ public:
 
     /** Total number of setValue / setAll calls since creation. */
     int64_t getEpoch();
+
+    /** Session ID written when the store was created. */
+    int64_t getSessionId();
 
     /** Linear scan for slot index by name.  Returns -1 if not found. */
     int64_t findName(const std::string &name);

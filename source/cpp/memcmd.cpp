@@ -15,7 +15,8 @@ namespace
         hv_size     = 0,
         hv_write    = hv_size    + sizeof(int64_t),
         hv_seq      = hv_write   + sizeof(int64_t),
-        hv_readers  = hv_seq     + sizeof(int64_t),  // active reader count
+        hv_id       = hv_seq     + sizeof(int64_t),
+        hv_readers  = hv_id      + sizeof(int64_t),  // active reader count
         hv_mutex    = hv_readers + sizeof(int64_t),
         hv_cond     = hv_mutex   + sizeof(interprocess_mutex),
         hv_last     = hv_cond    + sizeof(interprocess_condition)
@@ -58,15 +59,20 @@ void memcmd::close()
 
 bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCreate)
 {
+    set_last_error(errc::ok);
     close();
 
     int64_t backingSize = 0;
     if (!checkedBackingSize(size, backingSize))
+    {
+        set_last_error(errc::invalid_argument);
         return false;
+    }
 
     if (!m_mem.open(sName, backingSize, bCreate, false))
     {
         close();
+        set_last_error(errc::open_failed);
         return false;
     }
 
@@ -74,12 +80,14 @@ bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCr
     if (!p)
     {
         close();
+        set_last_error(errc::not_open);
         return false;
     }
 
     if (m_mem.size() < backingSize)
     {
         close();
+        set_last_error(errc::invalid_layout);
         return false;
     }
 
@@ -92,6 +100,7 @@ bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCr
         *pSize                          = size;
         *(int64_t*)(p + hv_write)       = 0;
         *(int64_t*)(p + hv_seq)         = 0;
+        *(int64_t*)(p + hv_id)          = (int64_t)std::mt19937_64(std::random_device{}())();
         *(int64_t*)(p + hv_readers)     = 0;
         new (pMutex) interprocess_mutex();
         new (pCond)  interprocess_condition();
@@ -101,6 +110,7 @@ bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCr
         std::cout << "memcmd::open size mismatch: " << *pSize
                   << " != " << size << std::endl;
         close();
+        set_last_error(errc::size_mismatch);
         return false;
     }
 
@@ -111,6 +121,7 @@ bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCr
         m_bReader = true;
     }
 
+    set_last_error(errc::ok);
     return true;
 }
 
@@ -120,6 +131,7 @@ bool memcmd::write(const std::string &sMsg)
     if (!p)
     {
         std::cout << "memcmd::write: not open" << std::endl;
+        set_last_error(errc::not_open);
         return false;
     }
 
@@ -135,6 +147,7 @@ bool memcmd::write(const std::string &sMsg)
     {
         std::cout << "memcmd::write: invalid length " << len
                   << " (max " << (*pSize - 1) << ")" << std::endl;
+        set_last_error(len <= 0 ? errc::invalid_argument : errc::message_too_large);
         return false;
     }
 
@@ -144,6 +157,7 @@ bool memcmd::write(const std::string &sMsg)
         if (!lk)
         {
             std::cout << "memcmd::write: failed to acquire lock" << std::endl;
+            set_last_error(errc::lock_timeout);
             return false;
         }
 
@@ -165,6 +179,7 @@ bool memcmd::write(const std::string &sMsg)
         pCond->notify_all();
     }
 
+    set_last_error(errc::ok);
     return true;
 }
 
@@ -176,6 +191,7 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
     if (!p)
     {
         std::cout << "memcmd::read: not open" << std::endl;
+        set_last_error(errc::not_open);
         return std::string();
     }
 
@@ -191,6 +207,7 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
     if (!lk)
     {
         std::cout << "memcmd::read: failed to acquire lock" << std::endl;
+        set_last_error(errc::lock_timeout);
         return std::string();
     }
 
@@ -205,12 +222,21 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
     if (m_nRead == *pWrite)
     {
         if (0 >= wait_ms)
+        {
+            set_last_error(errc::timeout);
             return std::string();
+        }
         if (!pCond->timed_wait(lk,
                 boost::get_system_time() + boost::posix_time::milliseconds(wait_ms)))
+        {
+            set_last_error(errc::timeout);
             return std::string();
+        }
         if (m_nRead == *pWrite)
+        {
+            set_last_error(errc::timeout);
             return std::string();
+        }
     }
 
     // Read the frame length; a zero value is the wrap sentinel
@@ -225,6 +251,7 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
         {
             std::cout << "memcmd::read: invalid length " << len
                       << " at " << m_nRead << std::endl;
+            set_last_error(errc::invalid_layout);
             return std::string();
         }
     }
@@ -236,6 +263,7 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
         m_nRead    = *pWrite;
         m_nLastSeq = *pSeq;
         if (pOverrun) *pOverrun = true;
+        set_last_error(errc::overrun);
         return std::string();
     }
 
@@ -243,6 +271,7 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
     m_nRead    += fv_last + len;
     m_nLastSeq  = frame_seq;
 
+    set_last_error(errc::ok);
     return val;
 }
 
@@ -253,6 +282,14 @@ int64_t memcmd::readerCount()
         return 0;
     return std::atomic_ref<int64_t>(*(int64_t*)(p + hv_readers))
                .load(std::memory_order_relaxed);
+}
+
+int64_t memcmd::getSessionId()
+{
+    char *p = m_mem.data();
+    if (!p)
+        return 0;
+    return *(int64_t*)(p + hv_id);
 }
 
 }; // end namespace

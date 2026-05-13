@@ -22,6 +22,9 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
   - [memcmd — command channel](#memcmd--command-channel)
   - [memkv — key-value store](#memkv--key-value-store)
   - [sys — signal handling](#sys--signal-handling)
+- [Convenience Wrappers](#convenience-wrappers)
+- [Diagnostics](#diagnostics)
+- [Examples](#examples)
 - [Comparison to Similar Projects](#comparison-to-similar-projects)
 - [License](#license)
 
@@ -35,6 +38,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - **`memaud`** — lock-free multi-buffer audio ring buffer (8-bit or 16-bit PCM) with overrun detection
 - **`memcmd`** — multi-producer, multi-consumer broadcast command channel with overrun detection
 - **`memkv`** — fixed-schema key-value store; lock-free seqlock reads, atomic batch writes, change notifications
+- Convenience wrappers for common reader/writer roles
 - Single public include, compiled library implementation
 - C++20, bool-returning open/write APIs
 - Defensive validation of shared-memory headers before attaching to existing structured shares
@@ -77,6 +81,7 @@ ctest --test-dir ./build -R "MemAud"
 ctest --test-dir ./build -R "MemCmd"
 ctest --test-dir ./build -R "MemKV"
 ctest --test-dir ./build -R "ipc_smoke"
+ctest --test-dir ./build -R "Stress"
 ```
 
 ---
@@ -88,6 +93,12 @@ cmake --install ./build
 ```
 
 Installs the library to `lib/` and headers to `include/`.
+
+Examples are built by default. Disable them with:
+
+```bash
+cmake . -B ./build -DLIBMEMBUS_BUILD_EXAMPLES=OFF
+```
 
 ---
 
@@ -229,6 +240,8 @@ while (running)
 }
 ```
 
+`memmsg`, `memcmd`, and `memkv` also expose `getSessionId()`. Use it the same way when an application needs to detect owner restart or stale namespace entries.
+
 ### Command channels — multiple writers
 
 `memcmd` reverses the data-flow direction: multiple consumer processes write commands, and the capture process reads them. This is the typical pattern for camera control (pan, tilt, zoom) where any viewer may send a command at any time.
@@ -307,6 +320,8 @@ The process that created the share (`existing() == false`) owns it and removes i
 
 Opening an existing share with `bCreate=true` does not resize it. `nSize` is used to size newly-created shares; attached handles report the actual mapped size via `size()`.
 
+Use `memmap::remove(name)` to explicitly clean up a stale share from the OS namespace.
+
 ---
 
 ### memmsg — message queue
@@ -343,6 +358,8 @@ Notes:
 - Both sides must open with the same `size` or the attach will fail.
 - Attach also fails if an existing share is too small for the requested queue layout.
 - The internal mutex is acquired with a 5-second timeout; if the writer crashes holding the lock, readers will surface an error rather than blocking forever.
+- `getSessionId()` returns the random ID written when the queue was created.
+- `memmsg::remove(name)` removes a stale queue from the namespace.
 
 ---
 
@@ -389,6 +406,7 @@ mmb::memvid::vidview frame = consumer.getBuf(rPos);
 | `getSeq()` | Global write-sequence counter (incremented by every `next()`) |
 | `getFrameSeq(idx)` | Sequence number stamped in slot `idx`; 0 means never written |
 | `getSessionId()` | Random ID written at share creation; changes on every writer restart |
+| `waitForFrame(wait_ms, lastSeq)` | Poll until `getSeq() > lastSeq` or timeout |
 
 **Metadata:**
 
@@ -443,6 +461,7 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 | `getBufSize()` | Bytes per buffer |
 
 The pointer/sequence/session helpers (`setPtr`, `getPtr`, `next`, `getPtrErr`, `getSeq`, `getFrameSeq`, `getSessionId`) work identically to the `memvid` equivalents.
+`waitForFrame(wait_ms, lastSeq)` is also available and follows the same polling semantics.
 
 Supported `bps` values: `8` or `16`.
 
@@ -494,6 +513,10 @@ Attach also fails if an existing share is too small for the requested command-ch
 | Empty string, `*pOverrun = true` | Reader was lapped; position resynced — call `read()` again |
 
 **`readerCount()`** — number of handles currently opened with `bReader=true`. Treat as a hint; may be temporarily stale if a reader crashed before calling `close()`.
+
+**`getSessionId()`** — random ID written when the channel was created.
+
+**`memcmd::remove(name)`** — removes a stale command channel from the namespace.
 
 ---
 
@@ -556,6 +579,10 @@ changed = reader.getChanged(100, epoch);    // blocks up to 100 ms
 
 **`waitForChange(wait_ms, epoch)`** — blocks until epoch advances; returns true if a change occurred, false on timeout.
 
+**`getSessionId()`** — random ID written when the store was created.
+
+**`memkv::remove(name)`** — removes a stale key-value store from the namespace.
+
 **Owner crash recovery** — `getValue()` caps retries at 1000 (sets `*pStale = true` if stuck). `waitForChange()` / `setValue()` / `setAll()` fail with false after a 5 s lock timeout. Application-level recovery: monitor `waitForChange()` timeouts, then `close()` and `open()` to reconnect.
 
 ---
@@ -574,6 +601,66 @@ while (!ctrl_c_count)
 ```
 
 `ctrl_c_count` is incremented each time Ctrl-C is pressed. After three presses the process exits immediately.
+
+---
+
+## Convenience Wrappers
+
+The core classes remain available directly, but `libmembus.h` also includes small role-oriented wrappers for common patterns:
+
+| Wrapper | Underlying type | Role |
+|---|---|---|
+| `memmsg_writer` | `memmsg` | Creates/writes a single-producer message queue |
+| `memmsg_reader` | `memmsg` | Attaches/reads a message queue |
+| `memcmd_sender` | `memcmd` | Attaches and writes commands |
+| `memcmd_receiver` | `memcmd` | Creates/attaches as a registered command reader |
+| `memvid_writer` | `memvid` | Creates a 24-bit video ring and publishes frames |
+| `memvid_reader` | `memvid` | Opens an existing video ring, tracks position, detects overrun |
+| `memaud_writer` | `memaud` | Creates an audio ring and publishes buffers |
+| `memaud_reader` | `memaud` | Opens an existing audio ring, tracks position, detects overrun |
+
+Example:
+
+```cpp
+mmb::memcmd_receiver receiver;
+mmb::memcmd_sender sender;
+
+receiver.open("/commands", 4096);
+sender.open("/commands", 4096);
+
+sender.write("pan_left");
+std::string cmd = receiver.read(100);
+```
+
+The wrappers intentionally stay thin. Call `raw()` when you need direct access to the underlying object.
+
+---
+
+## Diagnostics
+
+Most APIs return `bool`, numeric status, or an empty string on failure. The thread-local diagnostic helpers provide the last error category:
+
+```cpp
+if (!queue.open("/my_queue", 1024, false, false))
+    std::cerr << mmb::last_error_message() << "\n";
+```
+
+Available values include `invalid_argument`, `open_failed`, `create_failed`, `map_failed`, `size_mismatch`, `invalid_layout`, `not_open`, `access_denied`, `message_too_large`, `lock_timeout`, `timeout`, and `overrun`.
+
+---
+
+## Examples
+
+Runnable examples live in `examples/` and are built by default:
+
+```bash
+./build/examples/example-memmsg_pingpong
+./build/examples/example-memcmd_control
+./build/examples/example-memkv_state
+./build/examples/example-memvid_dummy_frames
+```
+
+They are intentionally small and cover the common happy-path setup for each abstraction family.
 
 ---
 
