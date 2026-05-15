@@ -106,22 +106,29 @@ memvid::vidview memvid::getBuf(int64_t idx) noexcept(false)
     if (!p)
         throw std::exception();
 
-    int64_t *pSize = (int64_t*)(p + hv_size);
-    int64_t *pPtr = (int64_t*)(p + hv_ptr);
-    int64_t *pWidth = (int64_t*)(p + hv_width);
-    int64_t *pHeight = (int64_t*)(p + hv_height);
-    int64_t *pScanWidth = (int64_t*)(p + hv_scanwidth);
+    // Snapshot header values to prevent TOCTOU from a concurrent header write
+    int64_t bufs    = *(int64_t*)(p + hv_bufs);
+    int64_t blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t w       = *(int64_t*)(p + hv_width);
+    int64_t h       = *(int64_t*)(p + hv_height);
+    int64_t sw      = *(int64_t*)(p + hv_scanwidth);
     video_format fmt = (video_format)*(int64_t*)(p + hv_format);
-    int64_t *pBufs = (int64_t*)(p + hv_bufs);
-    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
+    int64_t mapped  = m_mem.size();
 
-    // Wrap index with full modulo so any offset is valid
-    if (0 >= *pBufs)
+    if (bufs <= 0 || blockSz <= 0 || w <= 0 || h <= 0 || sw <= 0)
         throw std::exception();
-    idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
-    return memvid::vidview(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last,
-                           *pScanWidth * *pHeight, *pScanWidth, *pWidth, *pHeight, fmt);
+    idx = ((idx % bufs) + bufs) % bufs;
+
+    // Verify the slot's pixel region lies entirely within the mapped region
+    int64_t slotStart = hv_last + idx * blockSz;
+    int64_t dataStart = slotStart + fv_last;
+    int64_t dataSize  = sw * h;
+    if (slotStart < hv_last || dataStart < slotStart
+        || dataSize < 0 || dataStart + dataSize > mapped)
+        throw std::exception();
+
+    return memvid::vidview(p + dataStart, dataSize, sw, w, h, fmt);
 }
 
 bool memvid::fill(int64_t idx, int col)
@@ -130,21 +137,24 @@ bool memvid::fill(int64_t idx, int col)
     if (!p)
         return false;
 
-    int64_t *pSize = (int64_t*)(p + hv_size);
-    int64_t *pPtr = (int64_t*)(p + hv_ptr);
-    int64_t *pWidth = (int64_t*)(p + hv_width);
-    int64_t *pHeight = (int64_t*)(p + hv_height);
-    int64_t *pScanWidth = (int64_t*)(p + hv_scanwidth);
-    int64_t *pBufs = (int64_t*)(p + hv_bufs);
-    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
+    // Snapshot to prevent TOCTOU
+    int64_t bufs    = *(int64_t*)(p + hv_bufs);
+    int64_t blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t sw      = *(int64_t*)(p + hv_scanwidth);
+    int64_t h       = *(int64_t*)(p + hv_height);
+    int64_t mapped  = m_mem.size();
 
-    // Wrap index with full modulo so any offset is valid
-    if (0 >= *pBufs)
+    if (bufs <= 0 || blockSz <= 0 || sw <= 0 || h <= 0)
         return false;
-    idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
-    memset(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last, col, *pScanWidth * *pHeight);
+    idx = ((idx % bufs) + bufs) % bufs;
 
+    int64_t dataStart = hv_last + idx * blockSz + fv_last;
+    int64_t dataSize  = sw * h;
+    if (dataStart < (int64_t)hv_last + (int64_t)fv_last || dataSize < 0 || dataStart + dataSize > mapped)
+        return false;
+
+    memset(p + dataStart, col, dataSize);
     return true;
 }
 
@@ -351,7 +361,7 @@ bool memvid::open_existing(const std::string &sName)
 {
     close();
 
-    if (!m_mem.open(sName, 0, false))
+    if (!m_mem.open(sName, 0, false, false, /*bReadOnly=*/true))
         return false;
 
     char *p = m_mem.data();

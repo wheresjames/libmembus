@@ -26,8 +26,15 @@ enum FrameHeaderVal
     fv_last         = fv_seq  + sizeof(int64_t)
 };
 
-/// Minimum buffer overhead
-const int64_t c_minOverhead = hv_last + (2 * fv_last);
+/// Minimum buffer overhead (2 × max frame header + 7 bytes of alignment padding each)
+const int64_t c_minOverhead = hv_last + (2 * (fv_last + 7));
+
+/// Round up total frame size (header + payload) to an 8-byte boundary so every
+/// subsequent frame header lands on a naturally-aligned address.
+inline int64_t frameStride(int64_t len)
+{
+    return (fv_last + len + 7) & ~int64_t(7);
+}
 
 namespace
 {
@@ -111,8 +118,7 @@ bool memmsg::open(const std::string &sName, int64_t size, bool bWrite, bool bCre
         new (pCond) interprocess_condition();
     }
     else if (*pSize != size)
-    {   std::cout << "Size mismatch : " << *pSize << " != " << size << std::endl;
-        close();
+    {   close();
         set_last_error(errc::size_mismatch);
         return false;
     }
@@ -126,15 +132,13 @@ bool memmsg::open(const std::string &sName, int64_t size, bool bWrite, bool bCre
 bool memmsg::write(const std::string &sMsg)
 {
     if (!m_bWrite)
-    {   std::cout << "No write access" << std::endl;
-        set_last_error(errc::access_denied);
+    {   set_last_error(errc::access_denied);
         return false;
     }
 
     char *p = m_mem.data();
     if (!p)
-    {   std::cout << "Invalid buffer" << std::endl;
-        set_last_error(errc::not_open);
+    {   set_last_error(errc::not_open);
         return false;
     }
 
@@ -147,10 +151,9 @@ bool memmsg::write(const std::string &sMsg)
     char *pBuf = (p + hv_last);
 
     // Invalid size or too big for the buffer?
-    int64_t len = sMsg.length();
+    int64_t len = (int64_t)sMsg.length();
     if (0 >= len || len >= *pSize)
-    {   std::cout << "Invalid length : " << len << " : max : " << *pSize << std::endl;
-        set_last_error(len <= 0 ? errc::invalid_argument : errc::message_too_large);
+    {   set_last_error(len <= 0 ? errc::invalid_argument : errc::message_too_large);
         return false;
     }
 
@@ -160,15 +163,16 @@ bool memmsg::write(const std::string &sMsg)
         scoped_lock<interprocess_mutex> lk(*pMutex,
             boost::get_system_time() + boost::posix_time::milliseconds(5000));
         if (!lk)
-        {   std::cout << "memmsg::write failed to acquire lock" << std::endl;
-            set_last_error(errc::lock_timeout);
+        {   set_last_error(errc::lock_timeout);
             return false;
         }
 
+        int64_t stride = frameStride(len);
+
         // Do we need to wrap the buffer?
-        if (0 > *pWrite || (fv_last + len) >= (*pSize - *pWrite))
+        if (0 > *pWrite || stride > (*pSize - *pWrite))
         {
-            // Loop if the write pointer is reasonable
+            // Write wrap sentinel at current position
             if (0 < *pWrite && *pWrite < *pSize)
                 *(int64_t*)(pBuf + *pWrite) = 0;
 
@@ -176,16 +180,14 @@ bool memmsg::write(const std::string &sMsg)
             *pWrite = 0;
         }
 
-        // It fits here! Write length, then sequence number, then payload.
+        // Write length, then sequence number, then payload.
         int64_t seq = ++(*pSeq);
         *(int64_t*)(pBuf + *pWrite + fv_size) = len;
         *(int64_t*)(pBuf + *pWrite + fv_seq)  = seq;
         memcpy(pBuf + *pWrite + fv_last, sMsg.c_str(), len);
 
-        // Increment write pointer
-        *pWrite += fv_last + len;
-
-        // Initialize next slot to zero
+        // Advance by aligned stride; zero the next slot's length field
+        *pWrite += stride;
         *(int64_t*)(pBuf + *pWrite) = 0;
 
         // Notify under the lock to prevent lost wakeups
@@ -202,8 +204,7 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
 
     char *p = m_mem.data();
     if (!p)
-    {   std::cout << "Invalid buffer" << std::endl;
-        set_last_error(errc::not_open);
+    {   set_last_error(errc::not_open);
         return std::string();
     }
 
@@ -221,8 +222,7 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
     scoped_lock<interprocess_mutex> lk(*pMutex,
         boost::get_system_time() + boost::posix_time::milliseconds(5000));
     if (!lk)
-    {   std::cout << "memmsg::read failed to acquire lock" << std::endl;
-        set_last_error(errc::lock_timeout);
+    {   set_last_error(errc::lock_timeout);
         return std::string();
     }
 
@@ -252,20 +252,18 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
         }
     }
 
-    // Validate length; check len before adding m_nRead to avoid integer overflow
+    // Validate length; zero is the wrap sentinel — jump to start of buffer
     int64_t len = *(int64_t*)(pBuf + m_nRead + fv_size);
-    if (0 >= len || len > *pSize - m_nRead)
+    if (0 >= len || frameStride(len) > *pSize - m_nRead)
     {
-        // Zero length is the wrap sentinel — jump to the start of the buffer
         m_nRead = 0;
 
         if (m_nRead == *pWrite)
             return std::string();
 
         len = *(int64_t*)(pBuf + m_nRead + fv_size);
-        if (0 >= len || len > *pSize - m_nRead)
+        if (0 >= len || frameStride(len) > *pSize - m_nRead)
         {
-            std::cout << "Invalid length : " << m_nRead << " : " << len << " : " << *pSize << " : " << *pWrite << std::endl;
             set_last_error(errc::invalid_layout);
             return std::string();
         }
@@ -284,7 +282,7 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
     }
 
     std::string val(pBuf + m_nRead + fv_last, len);
-    m_nRead    += fv_last + len;
+    m_nRead    += frameStride(len);
     m_nLastSeq  = frame_seq;
 
     set_last_error(errc::ok);

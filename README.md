@@ -7,6 +7,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - [Features](#features)
 - [Requirements](#requirements)
 - [Building](#building)
+  - [API documentation](#api-documentation)
 - [Installation](#installation)
 - [Design Model](#design-model)
   - [Ownership and reader model](#ownership-and-reader-model)
@@ -23,6 +24,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
   - [memkv — key-value store](#memkv--key-value-store)
   - [sys — signal handling](#sys--signal-handling)
 - [Convenience Wrappers](#convenience-wrappers)
+- [Robustness and Security](#robustness-and-security)
 - [Diagnostics](#diagnostics)
 - [Examples](#examples)
 - [Performance](#performance)
@@ -43,6 +45,8 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - Single public include, compiled library implementation
 - C++20, bool-returning open/write APIs
 - Defensive validation of shared-memory headers before attaching to existing structured shares
+- TOCTOU-resistant buffer accessors: `getBuf()` bounds-checks all header-driven offsets at call time
+- Reader handles for `memvid` and `memaud` map shared memory read-only (least-privilege)
 
 ---
 
@@ -81,9 +85,23 @@ ctest --test-dir ./build -R "MemVid"
 ctest --test-dir ./build -R "MemAud"
 ctest --test-dir ./build -R "MemCmd"
 ctest --test-dir ./build -R "MemKV"
-ctest --test-dir ./build -R "ipc_smoke"
+ctest --test-dir ./build -R "Convenience APIs"
 ctest --test-dir ./build -R "Stress"
+ctest --test-dir ./build -R "ipc_smoke"
 ```
+
+### API documentation
+
+Doxygen output is disabled by default. Enable it and build the `doc` target:
+
+```bash
+cmake . -B ./build -DLIBMEMBUS_BUILD_DOCS=ON
+cmake --build ./build --target doc
+```
+
+The generated HTML is written to `./build/docs/html/index.html`. Doxygen 1.9+
+is required; Graphviz (`dot`) is optional — class and include graphs are
+added automatically when `dot` is found.
 
 ---
 
@@ -105,6 +123,12 @@ Benchmarks are built by default. Disable them with:
 
 ```bash
 cmake . -B ./build -DLIBMEMBUS_BUILD_BENCHMARKS=OFF
+```
+
+API documentation is built as an explicit target (see [API documentation](#api-documentation) above) and is off by default. Enable it persistently with:
+
+```bash
+cmake . -B ./build -DLIBMEMBUS_BUILD_DOCS=ON
 ```
 
 ---
@@ -272,7 +296,7 @@ See the [`memcmd` API reference](#memcmd--command-channel) for the full API.
 | Reader attaches while writer runs | `open_existing()` maps to the live share; start with `rLastSeq = getSeq()` and `rPos = getPtr(0)` |
 | Reader falls behind by < `getBufs()` frames | Data is still in the ring; reader can catch up or skip |
 | Reader is lapped (`lag >= getBufs()`) | Detected via sequence check; reader resyncs and signals caller |
-| Reader disconnects cleanly | `close()` unmaps memory; share is not removed (reader opened with `m_bExisting = true`) |
+| Reader disconnects cleanly | `close()` unmaps memory; share is not removed (reader opened with `existing() == true`) |
 | Reader crashes | Same as clean disconnect from the writer's perspective |
 | Writer stops cleanly | Share is removed from namespace; readers' maps go stale; `getSeq()` stops advancing |
 | Writer crashes | Share lingers in namespace; `getSeq()` stops advancing; next writer restart removes the stale share and creates a fresh one |
@@ -298,8 +322,11 @@ mmb::memmap writer, reader;
 // Create a 1 KB shared memory region
 writer.open("/my_share", 1024, /*bCreate=*/true, /*bNew=*/true);
 
-// Attach from another process
+// Attach from another process (read-write)
 reader.open("/my_share", 1024, /*bCreate=*/false, /*bNew=*/false);
+
+// Attach read-only
+reader.open("/my_share", 0, false, false, /*bReadOnly=*/true);
 
 // Write and read raw strings
 writer.write("hello");
@@ -318,10 +345,11 @@ char* ptr = writer.data();  // raw pointer
 
 | Parameter | Description |
 |-----------|-------------|
-| `sName`   | Share name (POSIX: must start with `/`) |
-| `nSize`   | Size in bytes |
-| `bCreate` | Create if it does not exist |
-| `bNew`    | Unlink and recreate if it already exists |
+| `sName`    | Share name (POSIX: must start with `/`) |
+| `nSize`    | Size in bytes |
+| `bCreate`  | Create if it does not exist |
+| `bNew`     | Unlink and recreate if it already exists |
+| `bReadOnly`| Map read-only; forces `bCreate=false` and `bNew=false` |
 
 The process that created the share (`existing() == false`) owns it and removes it from the namespace on `close()`. Processes that attached to an existing share (`existing() == true`) do not remove it on close.
 
@@ -365,6 +393,7 @@ Notes:
 - Both sides must open with the same `size` or the attach will fail.
 - Attach also fails if an existing share is too small for the requested queue layout.
 - The internal mutex is acquired with a 5-second timeout; if the writer crashes holding the lock, readers will surface an error rather than blocking forever.
+- Frame records in the ring are padded to 8-byte alignment so that `int64_t` header fields in adjacent frames are always naturally aligned.  Shares created by older versions of the library (without alignment padding) are not compatible; close and reopen them.
 - `getSessionId()` returns the random ID written when the queue was created.
 - `memmsg::remove(name)` removes a stale queue from the namespace.
 
@@ -402,7 +431,9 @@ mmb::memvid::vidview frame = consumer.getBuf(rPos);
 // frame.m_size — total bytes (m_sw * m_h)
 ```
 
-`open_existing()` validates the header and rejects malformed or undersized shares before exposing buffer views.
+`open_existing()` validates the header, rejects malformed or undersized shares before exposing buffer views, and maps the segment **read-only** (least-privilege).  The writer always uses `open()` with `bCreate=true`, which maps read-write.
+
+`getBuf()` snapshots all header fields at call time and bounds-checks the computed slot offset against the mapped size before returning.  A peer that modifies header fields after `open_existing()` returns will cause `getBuf()` to throw rather than produce an out-of-bounds pointer.
 
 **Pointer and sequence helpers:**
 
@@ -472,7 +503,11 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 // buf.m_format — sample format
 ```
 
-`open_existing()` validates the header and rejects malformed or undersized shares before exposing buffer views.
+`open_existing()` validates the header, rejects malformed or undersized shares before exposing buffer views, and maps the segment **read-only** (least-privilege).
+
+`getBuf()` snapshots all header fields at call time and bounds-checks the computed slot offset against the mapped size before returning.
+
+**Buffer size note:** the samples-per-frame count is computed as `⌈sampleRate / fps⌉` (ceiling division).  This ensures each buffer holds at least one full frame's worth of audio even when the rates do not divide evenly, preventing long-running clock drift.  `getBufSize()` returns the actual byte count per buffer.
 
 **Metadata:**
 
@@ -537,6 +572,8 @@ if (cmd.open("/cam_commands", 4096))
 
 The process that creates the share owns it and removes it from the OS namespace on `close()`. Both sides must open with the same `size` or the attach will fail.
 Attach also fails if an existing share is too small for the requested command-channel layout.
+
+Frame records in the ring are padded to 8-byte alignment (same as `memmsg`); shares created by older library versions are not compatible.
 
 **`write(msg)`** — returns `false` if the payload is empty, too large for the buffer, or the mutex could not be acquired within 5 seconds (crash recovery).
 
@@ -603,11 +640,11 @@ changed = reader.getChanged(100, epoch);    // blocks up to 100 ms
 
 **`setValue(idx|name, value)`** — mutex-protected write to a single slot. Returns false if the value exceeds `maxValueLen` or the lock times out (5 s, crash recovery).
 
-**`setAll(map)`** — writes every entry under one mutex acquisition. All slots change atomically. Names not in the store are silently skipped.
+**`setAll(map)`** — writes every entry under one mutex acquisition. All slots change atomically. Names not in the store are silently skipped.  The epoch is incremented and `waitForChange` callers are notified **only** when at least one slot was actually written; an all-unknown or empty map is a no-op.
 
 **`getValue(idx|name, pStale)`** — lock-free seqlock read. `pStale` is set true if the seqlock was stuck (writer crash indicator).
 
-**`getAll()`** — epoch-checked consistent snapshot: retries until a complete pass finishes with no concurrent write.
+**`getAll()`** — epoch-checked consistent snapshot: retries until a complete pass finishes with no concurrent write, capped at 100 attempts to prevent livelock under sustained write pressure.  Returns the best-effort snapshot if the cap is reached.
 
 **`getChanged(epoch)`** — non-blocking; returns a map of every slot whose value changed since `epoch`; updates `epoch` to the current value.
 
@@ -636,7 +673,7 @@ while (!ctrl_c_count)
 // pressing Ctrl-C three times exits immediately
 ```
 
-`ctrl_c_count` is incremented each time Ctrl-C is pressed. After three presses the process exits immediately.
+`ctrl_c_count` is incremented each time Ctrl-C is pressed. Once the count exceeds 3 (i.e. after the fifth press) the process calls `_exit(1)` immediately, bypassing any further cleanup.
 
 ---
 
@@ -669,6 +706,51 @@ std::string cmd = receiver.read(100);
 ```
 
 The wrappers intentionally stay thin. Call `raw()` when you need direct access to the underlying object.
+
+`memaud_writer::open` does not accept a `bNew` parameter — `memaud::open` always removes and recreates the share when `bCreate=true`.  Use `memaud::remove(name)` explicitly beforehand if you need conditional teardown.
+
+---
+
+## Robustness and Security
+
+### Shared-memory trust model
+
+Named shared memory is accessible to any process with filesystem read/write
+permission on the segment.  libmembus is designed for cooperative IPC between
+processes in the same security domain.  It is not a safe channel between
+mutually distrusting processes.
+
+### Header validation
+
+All structured shares (`memmsg`, `memcmd`, `memvid`, `memaud`, `memkv`) validate
+their shared-memory headers before attaching:
+
+- Schema fields are checked against expected values; mismatched or undersized
+  shares are rejected.
+- `memvid::open_existing` and `memaud::open_existing` run a full layout
+  consistency check and map the segment **read-only**.
+- `getBuf()` in `memvid` and `memaud` snapshots header fields locally and
+  bounds-checks the computed slot address against the mapped size on every call.
+  A peer that modifies `hv_bufs`, `hv_blocksz`, or related fields after the
+  initial validation causes `getBuf()` to throw rather than produce an
+  out-of-bounds pointer.
+
+For `memmsg` and `memcmd`, the reader must acquire the shared interprocess mutex
+(stored inside the segment), which requires read-write mapping.  Those types
+therefore cannot use read-only protection.
+
+### Crash recovery
+
+All mutex-protected operations (`memmsg::write/read`, `memcmd::write/read`,
+`memkv::setValue/setAll/waitForChange`) use a 5-second timed lock.  If the
+owning process crashes while holding the mutex, waiting processes surface
+`errc::lock_timeout` rather than blocking forever.
+
+### Error reporting
+
+The library never writes to `stdout` or `stderr`.  All failure reasons are
+communicated through `bool` return values and `mmb::last_error()` /
+`mmb::last_error_message()`.
 
 ---
 

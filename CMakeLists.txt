@@ -91,6 +91,13 @@ if (LIBMEMBUS_BUILD_BENCHMARKS)
     add_subdirectory(bench)
 endif()
 
+#-------------------------------------------------------------
+# API documentation (Doxygen)
+option(LIBMEMBUS_BUILD_DOCS "Build API documentation with Doxygen (adds 'doc' target)" OFF)
+if (LIBMEMBUS_BUILD_DOCS)
+    include(${CMAKE_SOURCE_DIR}/cmake/doxygen.cmake)
+endif()
+
 
 #-------------------------------------------------------------
 # Install library and headers

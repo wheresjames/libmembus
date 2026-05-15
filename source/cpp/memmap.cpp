@@ -46,7 +46,7 @@ void memmap::close()
 
     // Remove share if needed
     if (_d->m_mem.get() && !m_bExisting && 0 < m_sName.length())
-        _d->m_mem->remove(m_sName.c_str());
+        shared_memory_object::remove(m_sName.c_str());
 
     // Lose the old object
     _d->m_map.reset();
@@ -57,25 +57,31 @@ void memmap::close()
     m_sName.clear();
 }
 
-bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bNew)
+bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bNew, bool bReadOnly)
 {
     set_last_error(errc::ok);
 
     // Out with the old
     close();
 
+    // Read-only opens cannot create or recreate a share
+    if (bReadOnly)
+        bCreate = bNew = false;
+
     // Delete any existing share if we're creating
     if (bCreate && bNew)
     {
-        try { shared_memory_object().remove(sName.c_str()); }
+        try { shared_memory_object::remove(sName.c_str()); }
         catch(...) {}
     }
+
+    const boost::interprocess::mode_t accessMode = bReadOnly ? read_only : read_write;
 
     // Try to open existing share
     bool bFail = false;
     try
     {   m_bExisting = true;
-        _d->m_mem.reset(new shared_memory_object(open_only, sName.c_str(), read_write));
+        _d->m_mem.reset(new shared_memory_object(open_only, sName.c_str(), accessMode));
     } catch(...) { bFail = true; set_last_error(errc::open_failed); }
 
     // Did we get anything?
@@ -101,7 +107,7 @@ bool memmap::open(const std::string &sName, int64_t nSize, bool bCreate, bool bN
             _d->m_mem->truncate(nSize);
 
         // Map the region
-        _d->m_map.reset(new mapped_region(*_d->m_mem, read_write));
+        _d->m_map.reset(new mapped_region(*_d->m_mem, accessMode));
     }
     catch(...)
     {

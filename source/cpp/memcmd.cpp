@@ -31,8 +31,8 @@ namespace
     };
 
     // Extra bytes allocated beyond the caller-requested size so sentinel
-    // and next-slot writes never go out of bounds.
-    const int64_t c_minOverhead = hv_last + (2 * fv_last);
+    // and next-slot writes never go out of bounds (includes 7-byte alignment pad each).
+    const int64_t c_minOverhead = hv_last + (2 * (fv_last + 7));
 
     bool checkedBackingSize(int64_t size, int64_t &backingSize)
     {
@@ -40,6 +40,11 @@ namespace
             return false;
         backingSize = size + c_minOverhead;
         return true;
+    }
+
+    inline int64_t frameStride(int64_t len)
+    {
+        return (fv_last + len + 7) & ~int64_t(7);
     }
 }
 
@@ -107,8 +112,6 @@ bool memcmd::open(const std::string &sName, int64_t size, bool bReader, bool bCr
     }
     else if (*pSize != size)
     {
-        std::cout << "memcmd::open size mismatch: " << *pSize
-                  << " != " << size << std::endl;
         close();
         set_last_error(errc::size_mismatch);
         return false;
@@ -130,7 +133,6 @@ bool memcmd::write(const std::string &sMsg)
     char *p = m_mem.data();
     if (!p)
     {
-        std::cout << "memcmd::write: not open" << std::endl;
         set_last_error(errc::not_open);
         return false;
     }
@@ -145,8 +147,6 @@ bool memcmd::write(const std::string &sMsg)
     int64_t len = (int64_t)sMsg.length();
     if (0 >= len || len >= *pSize)
     {
-        std::cout << "memcmd::write: invalid length " << len
-                  << " (max " << (*pSize - 1) << ")" << std::endl;
         set_last_error(len <= 0 ? errc::invalid_argument : errc::message_too_large);
         return false;
     }
@@ -156,16 +156,17 @@ bool memcmd::write(const std::string &sMsg)
             boost::get_system_time() + boost::posix_time::milliseconds(5000));
         if (!lk)
         {
-            std::cout << "memcmd::write: failed to acquire lock" << std::endl;
             set_last_error(errc::lock_timeout);
             return false;
         }
 
+        int64_t stride = frameStride(len);
+
         // Wrap the ring buffer if the message won't fit at the current position
-        if (0 > *pWrite || (fv_last + len) >= (*pSize - *pWrite))
+        if (0 > *pWrite || stride > (*pSize - *pWrite))
         {
             if (0 < *pWrite && *pWrite < *pSize)
-                *(int64_t*)(pBuf + *pWrite) = 0;  // sentinel: length 0 at wrap point
+                *(int64_t*)(pBuf + *pWrite) = 0;  // sentinel at wrap point
             *pWrite = 0;
         }
 
@@ -173,7 +174,7 @@ bool memcmd::write(const std::string &sMsg)
         *(int64_t*)(pBuf + *pWrite + fv_size) = len;
         *(int64_t*)(pBuf + *pWrite + fv_seq)  = seq;
         memcpy(pBuf + *pWrite + fv_last, sMsg.c_str(), len);
-        *pWrite += fv_last + len;
+        *pWrite += stride;
         *(int64_t*)(pBuf + *pWrite) = 0;  // pre-zero next slot's length field
 
         pCond->notify_all();
@@ -190,7 +191,6 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
     char *p = m_mem.data();
     if (!p)
     {
-        std::cout << "memcmd::read: not open" << std::endl;
         set_last_error(errc::not_open);
         return std::string();
     }
@@ -206,7 +206,6 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
         boost::get_system_time() + boost::posix_time::milliseconds(5000));
     if (!lk)
     {
-        std::cout << "memcmd::read: failed to acquire lock" << std::endl;
         set_last_error(errc::lock_timeout);
         return std::string();
     }
@@ -239,18 +238,16 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
         }
     }
 
-    // Read the frame length; a zero value is the wrap sentinel
+    // Read the frame length; zero is the wrap sentinel — jump to start of buffer
     int64_t len = *(int64_t*)(pBuf + m_nRead + fv_size);
-    if (0 >= len || len > *pSize - m_nRead)
+    if (0 >= len || frameStride(len) > *pSize - m_nRead)
     {
         m_nRead = 0;
         if (m_nRead == *pWrite)
             return std::string();
         len = *(int64_t*)(pBuf + m_nRead + fv_size);
-        if (0 >= len || len > *pSize - m_nRead)
+        if (0 >= len || frameStride(len) > *pSize - m_nRead)
         {
-            std::cout << "memcmd::read: invalid length " << len
-                      << " at " << m_nRead << std::endl;
             set_last_error(errc::invalid_layout);
             return std::string();
         }
@@ -268,7 +265,7 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
     }
 
     std::string val(pBuf + m_nRead + fv_last, len);
-    m_nRead    += fv_last + len;
+    m_nRead    += frameStride(len);
     m_nLastSeq  = frame_seq;
 
     set_last_error(errc::ok);

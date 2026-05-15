@@ -130,7 +130,6 @@ bool memkv::create(const std::string &sName,
              || *(int64_t*)(p + hv_maxValueLen) != maxValueLen
              || totalSize > m_mem.size())
     {
-        std::cout << "memkv::create: schema mismatch on existing share" << std::endl;
         close();
         set_last_error(errc::size_mismatch);
         return false;
@@ -165,7 +164,6 @@ bool memkv::open(const std::string &sName)
     if (!calcLayout(nCount, maxNameLen, maxValueLen, slotStride, totalSize)
         || totalSize > m_mem.size())
     {
-        std::cout << "memkv::open: invalid schema" << std::endl;
         close();
         set_last_error(errc::invalid_layout);
         return false;
@@ -264,6 +262,7 @@ bool memkv::setAll(const std::map<std::string, std::string> &values)
     if (!lk) { set_last_error(errc::lock_timeout); return false; }
 
     int64_t newEpoch = *pEpoch + 1;
+    int written = 0;
 
     for (auto &[name, value] : values)
     {
@@ -271,10 +270,14 @@ bool memkv::setAll(const std::map<std::string, std::string> &values)
         if (idx < 0) continue;
         if ((int64_t)value.length() > m_maxValueLen) continue;
         writeSlotLocked(p, idx, value, newEpoch);
+        ++written;
     }
 
-    *pEpoch = newEpoch;
-    pCond->notify_all();
+    if (written > 0)
+    {
+        *pEpoch = newEpoch;
+        pCond->notify_all();
+    }
     set_last_error(errc::ok);
     return true;
 }
@@ -337,15 +340,20 @@ std::map<std::string, std::string> memkv::getAll()
     std::map<std::string, std::string> result;
     int64_t e1, e2;
 
-    do
+    // Retry until a full pass completes with no concurrent write, capped at 100
+    // iterations to prevent livelock under sustained write pressure.
+    for (int attempt = 0; attempt < 100; ++attempt)
     {
         e1 = std::atomic_ref<int64_t>(*pEpoch).load(std::memory_order_acquire);
         result.clear();
         for (int64_t i = 0; i < cnt; i++)
             result[getName(i)] = getValue(i);
         e2 = std::atomic_ref<int64_t>(*pEpoch).load(std::memory_order_acquire);
-    } while (e1 != e2);
+        if (e1 == e2)
+            return result;
+    }
 
+    // Epoch kept changing — return best-effort snapshot
     return result;
 }
 

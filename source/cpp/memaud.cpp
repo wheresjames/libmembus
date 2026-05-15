@@ -61,7 +61,7 @@ namespace
         if (ch <= 0 || sampleBytes <= 0 || sampleRate <= 0 || fps <= 0 || bufs <= 0)
             return false;
 
-        int64_t samplesPerFrame = sampleRate / fps;
+        int64_t samplesPerFrame = (sampleRate + fps - 1) / fps;  // round up to avoid drift
         int64_t payload = 0, channelPayload = 0, blocks = 0;
         if (samplesPerFrame <= 0
             || !checkedMul(samplesPerFrame, sampleBytes, payload)
@@ -101,20 +101,26 @@ memaud::audview memaud::getBuf(int64_t idx) noexcept(false)
     if (!p)
         throw std::exception();
 
-    int64_t *pSize = (int64_t*)(p + hv_size);
-    int64_t *pPtr = (int64_t*)(p + hv_ptr);
-    int64_t *pCh = (int64_t*)(p + hv_ch);
+    // Snapshot header values to prevent TOCTOU from a concurrent header write
+    int64_t bufs    = *(int64_t*)(p + hv_bufs);
+    int64_t blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t ch      = *(int64_t*)(p + hv_ch);
     audio_format fmt = (audio_format)*(int64_t*)(p + hv_format);
-    int64_t *pBufs = (int64_t*)(p + hv_bufs);
-    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
+    int64_t mapped  = m_mem.size();
 
-    // Wrap index with full modulo so any offset is valid
-    if (0 >= *pBufs)
+    if (bufs <= 0 || blockSz <= 0 || ch <= 0 || blockSz <= fv_last)
         throw std::exception();
-    idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
-    return memaud::audview(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last,
-                           *pBlockSz - fv_last, *pCh, fmt);
+    idx = ((idx % bufs) + bufs) % bufs;
+
+    int64_t slotStart = hv_last + idx * blockSz;
+    int64_t dataStart = slotStart + fv_last;
+    int64_t dataSize  = blockSz - fv_last;
+    if (slotStart < hv_last || dataStart < slotStart
+        || dataSize <= 0 || dataStart + dataSize > mapped)
+        throw std::exception();
+
+    return memaud::audview(p + dataStart, dataSize, ch, fmt);
 }
 
 bool memaud::fill(int64_t idx, int col)
@@ -123,19 +129,22 @@ bool memaud::fill(int64_t idx, int col)
     if (!p)
         return false;
 
-    int64_t *pSize = (int64_t*)(p + hv_size);
-    int64_t *pPtr = (int64_t*)(p + hv_ptr);
-    int64_t *pCh = (int64_t*)(p + hv_ch);
-    int64_t *pBufs = (int64_t*)(p + hv_bufs);
-    int64_t *pBlockSz = (int64_t*)(p + hv_blocksz);
+    // Snapshot to prevent TOCTOU
+    int64_t bufs    = *(int64_t*)(p + hv_bufs);
+    int64_t blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t mapped  = m_mem.size();
 
-    // Wrap index with full modulo so any offset is valid
-    if (0 >= *pBufs)
+    if (bufs <= 0 || blockSz <= 0 || blockSz <= fv_last)
         return false;
-    idx = ((idx % *pBufs) + *pBufs) % *pBufs;
 
-    memset(m_mem.data() + hv_last + (idx * *pBlockSz) + fv_last, col, *pBlockSz - fv_last);
+    idx = ((idx % bufs) + bufs) % bufs;
 
+    int64_t dataStart = hv_last + idx * blockSz + fv_last;
+    int64_t dataSize  = blockSz - fv_last;
+    if (dataStart < (int64_t)hv_last + (int64_t)fv_last || dataSize <= 0 || dataStart + dataSize > mapped)
+        return false;
+
+    memset(p + dataStart, col, dataSize);
     return true;
 }
 
@@ -354,7 +363,7 @@ bool memaud::open_existing(const std::string &sName)
 {
     close();
 
-    if (!m_mem.open(sName, 0, false))
+    if (!m_mem.open(sName, 0, false, false, /*bReadOnly=*/true))
         return false;
 
     char *p = m_mem.data();

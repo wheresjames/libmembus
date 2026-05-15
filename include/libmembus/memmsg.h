@@ -4,106 +4,123 @@
 namespace LIBMEMBUS_NS
 {
 
-/** Memory mapped message buffer
-
-    <b>Example:</b>
-    @code
-
-        mmb::memmsg tx, rx;
-
-        if (!tx.open("/mymsg", 128, true, true))
-            return -1;
-
-        if (!rx.open("/mymsg", 128, false, false))
-            return -1;
-
-        for(int i = 0; i < 1000; i++)
-        {
-            std::string msg = std::string("Message ") + std::to_string(i);
-
-            if (!tx.write(msg))
-                return -1;
-
-            std::string rmsg = rx.read(0);
-            if (rmsg != msg)
-                return -1;
-        }
-
-    @endcode
-
-*/
+/** Single-producer, multi-consumer broadcast message queue in shared memory.
+ *
+ *  One process opens with bWrite=true and calls write() to publish messages.
+ *  Any number of independent reader processes open with bWrite=false; each
+ *  maintains its own private read position so all readers receive all messages
+ *  independently (broadcast, not work-stealing).
+ *
+ *  Messages are framed with a length and a monotonically increasing sequence
+ *  number.  A reader that falls so far behind that the writer has wrapped the
+ *  ring and overwritten unread frames will detect the gap via the sequence
+ *  numbers, resync, and surface errc::overrun.
+ *
+ *  @code
+ *      mmb::memmsg tx, rx;
+ *      tx.open("/mymsg", 128, true, true);   // writer, create
+ *      rx.open("/mymsg", 128, false, false); // reader, attach
+ *
+ *      tx.write("hello");
+ *
+ *      bool overrun = false;
+ *      std::string msg = rx.read(100, &overrun);
+ *  @endcode
+ */
 class memmsg
 {
 
 public:
 
-    /// Constructor
+    /// Construct an un-opened handle.
     memmsg() : m_bWrite(false), m_nRead(0), m_nLastSeq(-1) {};
 
-    /// Destructor
+    /// Destructor; calls close().
     virtual ~memmsg() { close(); }
 
-    /** Creates / attaches to an image ring buffer in memory
-        @param [in] sName   - Name of memory share to open
-        @param [in] size    - Size of the memory share
-        @param [in] bWrite  - Non-zero to open for writing, otherwise opened for read-only
-        @param [in] bCreate - Non-zero if the share should be created if it doesn't exist
-
-        @returns Non-zero if success.
-    */
+    /** Open or attach to a message queue.
+     *
+     *  Both sides must specify the same @p size or the attach will fail with
+     *  errc::size_mismatch.  Attach also fails when the existing share is too
+     *  small to hold the minimum queue layout.
+     *
+     *  @param sName    Share name (POSIX: must start with '/').
+     *  @param size     Logical ring-buffer capacity in bytes.
+     *  @param bWrite   Open for writing.  Pass false to open as a read-only
+     *                  consumer; write() will then return false with errc::access_denied.
+     *  @param bCreate  Create the share if it does not already exist.
+     *  @returns true on success; false on failure (see last_error()).
+     */
     bool open(const std::string &sName, int64_t size, bool bWrite, bool bCreate);
 
-    /// Remove a stale queue from the OS namespace
+    /** Remove a stale message queue from the OS namespace.
+     *  @param sName  Share name to remove.
+     *  @returns true if the object was removed.
+     */
     static bool remove(const std::string &sName) { return memmap::remove(sName); }
 
-    /** Close image share
-
-    */
+    /// Close the queue and release all resources.
     void close();
 
-    /** Write a message to the buffer
-        @param [in] sMsg    - Message to write into share
-
-        @returns Non-zero if message was written.
-
-        @note This function will fail if there is not enough room to write the message.
-    */
+    /** Write a message into the ring buffer.
+     *
+     *  The message is framed with a length and an incrementing sequence number
+     *  before being written.  Frame records are padded to 8-byte alignment.
+     *
+     *  @param sMsg  Message payload; must be non-empty and shorter than the
+     *               logical ring-buffer capacity.
+     *  @returns true on success.  Returns false if the handle was not opened for
+     *           writing (errc::access_denied), the payload is empty
+     *           (errc::invalid_argument), too large (errc::message_too_large),
+     *           or the mutex timed out (errc::lock_timeout).
+     */
     bool write(const std::string &sMsg);
 
-    /** Read a message from the buffer
-        @param [in]  wait      - Maximum number of milliseconds to wait for a message.
-        @param [out] pOverrun  - If non-null, set to true when one or more messages were
-                                 skipped because the writer lapped this reader.  m_nRead is
-                                 resynced to the current write position; call read() again to
-                                 receive the next message written after the resync.
-
-        @returns Message that was read, or an empty string on timeout or overrun.
-    */
+    /** Read the next message from the ring buffer.
+     *
+     *  Acquires the shared mutex for the duration of the read so that the
+     *  writer cannot wrap the buffer underneath this call.
+     *
+     *  @param wait      Maximum milliseconds to block waiting for a message.
+     *                   Pass 0 for a non-blocking poll.
+     *  @param pOverrun  If non-null, set to true when one or more messages were
+     *                   skipped because the writer lapped this reader.  The read
+     *                   position is resynced to the current write position; call
+     *                   read() again to receive the next message written after
+     *                   the resync.
+     *  @returns The message string, or an empty string on timeout (errc::timeout)
+     *           or overrun (errc::overrun).
+     */
     std::string read(uint64_t wait, bool *pOverrun = nullptr);
 
-    /** Returns true if memory already existed
-        @returns Non-zero if memory share already existed.
-    */
+    /** Returns true if this handle attached to an already-existing share.
+     *  @returns false if this handle created the queue; true if it attached.
+     */
     bool existing() { return m_mem.existing(); }
 
-    /// Returns true if a share is open.
+    /// Returns true if the queue is currently open.
     bool isOpen() { return m_mem.isOpen(); }
 
-    /// Session ID written when the queue was created.
+    /** Returns the random session ID written when the queue was created.
+     *
+     *  Readers should save this on open and compare periodically.  A change
+     *  indicates the writer restarted and this handle must be closed and reopened.
+     *  @returns Session ID, or 0 if the queue is not open.
+     */
     int64_t getSessionId();
 
 private:
 
-    /// The memory map
+    /// The underlying memory map.
     memmap      m_mem;
 
-    /// Non-zero if this is the writer
+    /// True if this handle was opened with bWrite=true.
     bool        m_bWrite;
 
-    /// Read pointer
+    /// Byte offset of the next frame to read within the ring buffer data area.
     int64_t     m_nRead;
 
-    /// Sequence number of the last message successfully read; -1 if none yet
+    /// Sequence number of the last message successfully read; -1 if none yet.
     int64_t     m_nLastSeq;
 
 };
