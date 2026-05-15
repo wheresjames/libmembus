@@ -214,6 +214,18 @@ public:
      */
     bool fill(int64_t idx, int col) { return m_vid.fill(idx, col); }
 
+    /** Write the video presentation timestamp for the current write slot.
+     *  @param pts  Timestamp value; call before next().
+     *  @returns true on success.
+     */
+    bool setVpts(int64_t pts) { return m_vid.setVpts(m_vid.getPtr(0), pts); }
+
+    /** Write the audio presentation timestamp for the current write slot.
+     *  @param pts  Timestamp value; call before next().
+     *  @returns true on success.
+     */
+    bool setApts(int64_t pts) { return m_vid.setApts(m_vid.getPtr(0), pts); }
+
     /** Stamp the current slot's sequence number and advance the write pointer.
      *  @param inc  Slots to advance (normally 1).
      *  @returns The new write-pointer slot index.
@@ -293,10 +305,22 @@ public:
 
         memvid::vidview view = m_vid.getBuf(m_pos);
         m_lastSeq = m_vid.getFrameSeq(m_pos);
+        m_lastVpts = m_vid.getVpts(m_pos);
+        m_lastApts = m_vid.getApts(m_pos);
         m_pos = (m_pos + 1) % m_vid.getBufs();
         set_last_error(errc::ok);
         return view;
     }
+
+    /** Return the video presentation timestamp of the last frame returned by readNext().
+     *  @returns vpts value, or 0 if readNext() has not been called yet.
+     */
+    int64_t lastVpts() const { return m_lastVpts; }
+
+    /** Return the audio presentation timestamp of the last frame returned by readNext().
+     *  @returns apts value, or 0 if readNext() has not been called yet.
+     */
+    int64_t lastApts() const { return m_lastApts; }
 
     /** Resync the read position to the current write position.
      *
@@ -323,6 +347,12 @@ private:
 
     /// Next slot index to read.
     int64_t m_pos = 0;
+
+    /// Video presentation timestamp of the last delivered frame.
+    int64_t m_lastVpts = 0;
+
+    /// Audio presentation timestamp of the last delivered frame.
+    int64_t m_lastApts = 0;
 };
 
 
@@ -357,6 +387,12 @@ public:
      *  @returns true on success.
      */
     bool fill(int64_t idx, int col) { return m_aud.fill(idx, col); }
+
+    /** Write the presentation timestamp for the current write slot.
+     *  @param pts  Timestamp value; call before next().
+     *  @returns true on success.
+     */
+    bool setPts(int64_t pts) { return m_aud.setPts(m_aud.getPtr(0), pts); }
 
     /** Stamp the current slot's sequence number and advance the write pointer.
      *  @param inc  Slots to advance (normally 1).
@@ -437,10 +473,16 @@ public:
 
         memaud::audview view = m_aud.getBuf(m_pos);
         m_lastSeq = m_aud.getFrameSeq(m_pos);
+        m_lastPts = m_aud.getPts(m_pos);
         m_pos = (m_pos + 1) % m_aud.getBufs();
         set_last_error(errc::ok);
         return view;
     }
+
+    /** Return the presentation timestamp of the last buffer returned by readNext().
+     *  @returns pts value, or 0 if readNext() has not been called yet.
+     */
+    int64_t lastPts() const { return m_lastPts; }
 
     /** Resync the read position to the current write position.
      *
@@ -467,6 +509,9 @@ private:
 
     /// Next slot index to read.
     int64_t m_pos = 0;
+
+    /// Presentation timestamp of the last delivered buffer.
+    int64_t m_lastPts = 0;
 };
 
 }; // end namespace

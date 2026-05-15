@@ -231,6 +231,31 @@ bool memaud::waitForFrame(uint64_t wait_ms, int64_t lastSeq)
     return false;
 }
 
+bool memaud::setPts(int64_t idx, int64_t pts)
+{
+    char *p = m_mem.data();
+    if (!p) return false;
+    int64_t bufs = *(int64_t*)(p + hv_bufs), blockSz = *(int64_t*)(p + hv_blocksz);
+    if (bufs <= 0 || blockSz <= 0) return false;
+    idx = ((idx % bufs) + bufs) % bufs;
+    int64_t off = hv_last + idx * blockSz + fv_pts;
+    if (off < 0 || off + (int64_t)sizeof(int64_t) > m_mem.size()) return false;
+    std::atomic_ref<int64_t>(*(int64_t*)(p + off)).store(pts, std::memory_order_relaxed);
+    return true;
+}
+
+int64_t memaud::getPts(int64_t idx)
+{
+    char *p = m_mem.data();
+    if (!p) return 0;
+    int64_t bufs = *(int64_t*)(p + hv_bufs), blockSz = *(int64_t*)(p + hv_blocksz);
+    if (bufs <= 0 || blockSz <= 0) return 0;
+    idx = ((idx % bufs) + bufs) % bufs;
+    int64_t off = hv_last + idx * blockSz + fv_pts;
+    if (off < 0 || off + (int64_t)sizeof(int64_t) > m_mem.size()) return 0;
+    return std::atomic_ref<int64_t>(*(int64_t*)(p + off)).load(std::memory_order_relaxed);
+}
+
 int64_t memaud::getSessionId()
 {
     char *p = m_mem.data();

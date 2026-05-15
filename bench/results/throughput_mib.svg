@@ -1,30 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1100" height="560" viewBox="0 0 1100 560">
 <rect width="100%" height="100%" fill="#0f172a"/>
 <text x="550.0" y="36" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#f8fafc">libmembus Data Throughput</text>
-<line x1="260" y1="55" x2="1060" y2="55" stroke="#334155"/>
-<text x="248" y="93" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memmap read/write (64 KiB)</text>
-<rect x="260" y="70" width="800.00" height="34" rx="4" fill="#60a5fa"/>
-<text x="1052.0" y="93" text-anchor="end" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a">49.64K MiB/s</text>
-<text x="248" y="145" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memmsg single writer/reader (64 B)</text>
-<rect x="260" y="122" width="7.28" height="34" rx="4" fill="#34d399"/>
-<text x="275.2780909175151" y="145" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">452 MiB/s</text>
-<text x="248" y="197" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memcmd 4 writers/1 reader (64 B)</text>
-<rect x="260" y="174" width="7.33" height="34" rx="4" fill="#a78bfa"/>
-<text x="275.33032235710283" y="197" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">455 MiB/s</text>
-<text x="248" y="249" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memkv setValue (64 B value)</text>
-<rect x="260" y="226" width="10.11" height="34" rx="4" fill="#fb7185"/>
-<text x="278.1075974101844" y="249" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">627 MiB/s</text>
-<text x="248" y="301" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memkv getValue (64 B value)</text>
-<rect x="260" y="278" width="30.88" height="34" rx="4" fill="#fb7185"/>
-<text x="298.87730607607483" y="301" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">1.92K MiB/s</text>
-<text x="248" y="353" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memvid publish (640x480)</text>
-<rect x="260" y="330" width="659.32" height="34" rx="4" fill="#fb923c"/>
-<text x="927.3151573510393" y="353" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">40.91K MiB/s</text>
-<text x="248" y="405" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memvid publish (1920x1080)</text>
-<rect x="260" y="382" width="370.10" height="34" rx="4" fill="#fb923c"/>
-<text x="638.1018924025898" y="405" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">22.97K MiB/s</text>
-<text x="248" y="457" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memaud publish (stereo S16LE 48k/100fps)</text>
-<rect x="260" y="434" width="550.41" height="34" rx="4" fill="#22d3ee"/>
-<text x="818.409140904824" y="457" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">34.15K MiB/s</text>
-<text x="260" y="540" font-family="Arial, sans-serif" font-size="12" fill="#94a3b8">Higher is better. Generated from bench-libmembus JSON output.</text>
+<line x1="300" y1="55" x2="1060" y2="55" stroke="#334155"/>
+<text x="288" y="93" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memmap read/write (64 KiB)</text>
+<rect x="300" y="70" width="760.00" height="34" rx="4" fill="#60a5fa"/>
+<text x="1052.0" y="93" text-anchor="end" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a">53.75K MiB/s</text>
+<text x="288" y="145" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memmsg single writer/reader (64 B)</text>
+<rect x="300" y="122" width="6.73" height="34" rx="4" fill="#34d399"/>
+<text x="314.7323703100057" y="145" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">476 MiB/s</text>
+<text x="288" y="197" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memcmd 4 writers/1 reader (64 B)</text>
+<rect x="300" y="174" width="6.38" height="34" rx="4" fill="#a78bfa"/>
+<text x="314.3798829338721" y="197" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">451 MiB/s</text>
+<text x="288" y="249" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memkv setValue (64 B value)</text>
+<rect x="300" y="226" width="8.98" height="34" rx="4" fill="#fb7185"/>
+<text x="316.97939249154376" y="249" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">635 MiB/s</text>
+<text x="288" y="301" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memkv getValue (64 B value)</text>
+<rect x="300" y="278" width="29.32" height="34" rx="4" fill="#fb7185"/>
+<text x="337.3191782300167" y="301" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">2.07K MiB/s</text>
+<text x="288" y="353" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memvid publish (640x480)</text>
+<rect x="300" y="330" width="567.10" height="34" rx="4" fill="#fb923c"/>
+<text x="875.0963060538742" y="353" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">40.11K MiB/s</text>
+<text x="288" y="405" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memvid publish (1920x1080)</text>
+<rect x="300" y="382" width="308.08" height="34" rx="4" fill="#fb923c"/>
+<text x="616.0814327762831" y="405" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">21.79K MiB/s</text>
+<text x="288" y="457" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#cbd5e1">memaud publish (stereo S16LE 48k/100fps)</text>
+<rect x="300" y="434" width="518.96" height="34" rx="4" fill="#22d3ee"/>
+<text x="826.9630010009786" y="457" font-family="Arial, sans-serif" font-size="14" fill="#e2e8f0">36.70K MiB/s</text>
+<text x="300" y="540" font-family="Arial, sans-serif" font-size="12" fill="#94a3b8">Generated from bench-libmembus JSON output.</text>
 </svg>

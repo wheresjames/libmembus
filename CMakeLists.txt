@@ -35,6 +35,8 @@ project("${APPNAME}"
         LANGUAGES CXX
     )
 
+include(GNUInstallDirs)
+
 # App Variables
 add_compile_options(-DAPPNAME="${APPNAME}")
 add_compile_options(-DAPPNAMERAW=${APPNAME})
@@ -100,14 +102,47 @@ endif()
 
 
 #-------------------------------------------------------------
-# Install library and headers
+# Install library, headers, and CMake find_package support
+
+# Library and target export
 install(TARGETS ${APPNAME}
-        RUNTIME DESTINATION bin
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
+        EXPORT  libmembusTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 
+# Public headers
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
-        DESTINATION include
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         FILES_MATCHING PATTERN "*.h"
+    )
+
+# CMake package files
+include(CMakePackageConfigHelpers)
+
+set(_cmake_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/libmembus")
+
+configure_package_config_file(
+    "${CMAKE_SOURCE_DIR}/cmake/libmembusConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/libmembusConfig.cmake"
+    INSTALL_DESTINATION "${_cmake_install_dir}"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/libmembusConfigVersion.cmake"
+    VERSION ${APPVERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/libmembusConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/libmembusConfigVersion.cmake"
+        DESTINATION "${_cmake_install_dir}"
+    )
+
+install(EXPORT libmembusTargets
+        FILE      libmembusTargets.cmake
+        NAMESPACE libmembus::
+        DESTINATION "${_cmake_install_dir}"
     )

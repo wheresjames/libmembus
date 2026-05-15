@@ -251,6 +251,53 @@ TEST_CASE("MemAud", "[memaud]")
         REQUIRE_THROWS(reader.getBuf(1));
     }
 
+    SECTION("setPts / getPts round-trip")
+    {
+        mmb::memaud aud;
+        REQUIRE(aud.open("/memaud_pts", true, 1, mmb::audio_format::u8, 8000, 100, 4));
+
+        // All slots start at zero
+        REQUIRE(aud.getPts(0) == 0);
+
+        REQUIRE(aud.setPts(0, 5000000LL));
+        REQUIRE(aud.getPts(0) == 5000000LL);
+
+        // Other slots unchanged
+        REQUIRE(aud.getPts(1) == 0);
+
+        // Index wraps (bufs=4): slot 4 → slot 0
+        REQUIRE(aud.getPts(4) == 5000000LL);
+
+        // Negative timestamps stored verbatim
+        REQUIRE(aud.setPts(1, -42));
+        REQUIRE(aud.getPts(1) == -42);
+    }
+
+    SECTION("setPts survives next() without being overwritten")
+    {
+        mmb::memaud aud;
+        REQUIRE(aud.open("/memaud_pts_next", true, 1, mmb::audio_format::u8, 8000, 100, 3));
+        REQUIRE(aud.setPts(0, 77));
+        aud.next(1);  // stamps seq on slot 0, advances ptr to 1
+        REQUIRE(aud.getPts(0) == 77);
+    }
+
+    SECTION("memaud_reader exposes lastPts() after readNext()")
+    {
+        mmb::memaud_writer aw;
+        REQUIRE(aw.open("/memaud_pts_reader", 1, mmb::audio_format::u8, 8000, 100, 3));
+
+        mmb::memaud_reader ar;
+        REQUIRE(ar.open("/memaud_pts_reader"));
+
+        REQUIRE(aw.setPts(3333333LL));
+        aw.next(1);
+
+        REQUIRE(ar.wait(100));
+        ar.readNext();
+        REQUIRE(ar.lastPts() == 3333333LL);
+    }
+
     SECTION("Overrun detection: lag = getSeq() - rLastSeq >= getBufs()")
     {
         mmb::memaud aud;

@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# libmembus links Boost::stacktrace_backtrace; downstream projects need it too.
+find_dependency(Boost REQUIRED COMPONENTS stacktrace_backtrace)
+
+include("${CMAKE_CURRENT_LIST_DIR}/libmembusTargets.cmake")
+
+check_required_components(libmembus)

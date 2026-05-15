@@ -272,6 +272,15 @@ std::string memcmd::read(uint64_t wait_ms, bool *pOverrun)
     return val;
 }
 
+bool memcmd::poll()
+{
+    char *p = m_mem.data();
+    if (!p) return false;
+    int64_t write = std::atomic_ref<int64_t>(*(int64_t*)(p + hv_write))
+                        .load(std::memory_order_acquire);
+    return m_nRead != write;
+}
+
 int64_t memcmd::readerCount()
 {
     char *p = m_mem.data();

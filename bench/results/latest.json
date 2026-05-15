@@ -2,16 +2,20 @@
   "metadata": {
     "duration_ms": 500,
     "system": "Linux 6.18.5+kali-amd64 x86_64",
-    "timestamp_unix": 1778694257
+    "timestamp_unix": 1778839599
   },
   "results": [
-    {"name":"memmap read/write","group":"memmap","payload":"64 KiB","operations":198563,"bytes":26026049536,"seconds":0.500002,"ops_per_sec":397125,"mb_per_sec":49640.6,"ns_per_op":2518.1},
-    {"name":"memmsg single writer/reader","group":"memmsg","payload":"64 B","operations":3699599,"bytes":236774336,"seconds":0.5,"ops_per_sec":7.3992e+06,"mb_per_sec":451.611,"ns_per_op":135.15},
-    {"name":"memcmd 4 writers/1 reader","group":"memcmd","payload":"64 B","operations":3726151,"bytes":238473664,"seconds":0.5,"ops_per_sec":7.4523e+06,"mb_per_sec":454.852,"ns_per_op":134.187},
-    {"name":"memkv setValue","group":"memkv","payload":"64 B value","operations":5137892,"bytes":328825088,"seconds":0.5,"ops_per_sec":1.02758e+07,"mb_per_sec":627.184,"ns_per_op":97.3162},
-    {"name":"memkv getValue","group":"memkv","payload":"64 B value","operations":15695582,"bytes":1004517248,"seconds":0.5,"ops_per_sec":3.13912e+07,"mb_per_sec":1915.96,"ns_per_op":31.8561},
-    {"name":"memvid publish","group":"memvid","payload":"640x480","operations":23274,"bytes":21449318400,"seconds":0.500004,"ops_per_sec":46547.6,"mb_per_sec":40911,"ns_per_op":21483.4},
-    {"name":"memvid publish","group":"memvid","payload":"1920x1080","operations":1936,"bytes":12043468800,"seconds":0.50013,"ops_per_sec":3870.99,"mb_per_sec":22965.1,"ns_per_op":258332},
-    {"name":"memaud publish","group":"memaud","payload":"stereo S16LE 48k/100fps","operations":9326129,"bytes":17906167680,"seconds":0.5,"ops_per_sec":1.86523e+07,"mb_per_sec":34153.3,"ns_per_op":53.6128}
+    {"name":"memmap read/write","group":"memmap","payload":"64 KiB","operations":214990,"bytes":28179169280,"seconds":0.500001,"ops_per_sec":429979,"mb_per_sec":53747.4,"ns_per_op":2325.7},
+    {"name":"memmsg single writer/reader","group":"memmsg","payload":"64 B","operations":3900332,"bytes":249621248,"seconds":0.5,"ops_per_sec":7.80066e+06,"mb_per_sec":476.115,"ns_per_op":128.194},
+    {"name":"memcmd 4 writers/1 reader","group":"memcmd","payload":"64 B","operations":3696125,"bytes":236552000,"seconds":0.5,"ops_per_sec":7.39225e+06,"mb_per_sec":451.187,"ns_per_op":135.277},
+    {"name":"memkv setValue","group":"memkv","payload":"64 B value","operations":5202128,"bytes":332936192,"seconds":0.5,"ops_per_sec":1.04043e+07,"mb_per_sec":635.025,"ns_per_op":96.1145},
+    {"name":"memkv getValue","group":"memkv","payload":"64 B value","operations":16985751,"bytes":1087088064,"seconds":0.5,"ops_per_sec":3.39715e+07,"mb_per_sec":2073.46,"ns_per_op":29.4364},
+    {"name":"memvid publish","group":"memvid","payload":"640x480","operations":22817,"bytes":21028147200,"seconds":0.500035,"ops_per_sec":45630.8,"mb_per_sec":40105.2,"ns_per_op":21915},
+    {"name":"memvid publish","group":"memvid","payload":"1920x1080","operations":1837,"bytes":11427609600,"seconds":0.500203,"ops_per_sec":3672.51,"mb_per_sec":21787.6,"ns_per_op":272293},
+    {"name":"memaud publish","group":"memaud","payload":"stereo S16LE 48k/100fps","operations":10021864,"bytes":19241978880,"seconds":0.5,"ops_per_sec":2.00437e+07,"mb_per_sec":36701.2,"ns_per_op":49.8909}
+  ],
+  "latency_results": [
+    {"name":"memmsg round-trip latency","group":"memmsg","payload":"64 B","samples":115255,"p50_us":3.912,"p95_us":6.041,"p99_us":6.833,"min_us":3.116,"max_us":167.627},
+    {"name":"select() wakeup latency","group":"select","payload":"1 memvid source","samples":99,"p50_us":551.184,"p95_us":1137.73,"p99_us":1192.25,"min_us":0.344,"max_us":1192.25}
   ]
 }

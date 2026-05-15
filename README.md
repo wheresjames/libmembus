@@ -22,6 +22,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
   - [memaud — audio ring buffer](#memaud--audio-ring-buffer)
   - [memcmd — command channel](#memcmd--command-channel)
   - [memkv — key-value store](#memkv--key-value-store)
+  - [select — wait on multiple sources](#select--wait-on-multiple-sources)
   - [sys — signal handling](#sys--signal-handling)
 - [Convenience Wrappers](#convenience-wrappers)
 - [Robustness and Security](#robustness-and-security)
@@ -41,6 +42,9 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - **`memaud`** — lock-free multi-buffer audio ring buffer with explicit sample formats and overrun detection
 - **`memcmd`** — multi-producer, multi-consumer broadcast command channel with overrun detection
 - **`memkv`** — fixed-schema key-value store; lock-free seqlock reads, atomic batch writes, change notifications
+- Presentation timestamps (`vpts`, `apts`) stored per slot in `memvid`; single `pts` field in `memaud`
+- `mmb::select()` — poll any combination of sources (rings, queues, key-value) with a single blocking call
+- CMake `find_package(libmembus)` support via installed config, version, and targets files
 - Convenience wrappers for common reader/writer roles
 - Single public include, compiled library implementation
 - C++20, bool-returning open/write APIs
@@ -86,6 +90,9 @@ ctest --test-dir ./build -R "MemAud"
 ctest --test-dir ./build -R "MemCmd"
 ctest --test-dir ./build -R "MemKV"
 ctest --test-dir ./build -R "Convenience APIs"
+ctest --test-dir ./build -R "memmsg poll"
+ctest --test-dir ./build -R "memcmd poll"
+ctest --test-dir ./build -R "select"
 ctest --test-dir ./build -R "Stress"
 ctest --test-dir ./build -R "ipc_smoke"
 ```
@@ -111,7 +118,16 @@ added automatically when `dot` is found.
 cmake --install ./build
 ```
 
-Installs the library to `lib/` and headers to `include/`.
+Installs the library to `lib/`, headers to `include/`, and CMake package files to `lib/cmake/libmembus/`.
+
+Downstream projects can then locate and link the library with:
+
+```cmake
+find_package(libmembus REQUIRED)
+target_link_libraries(myapp PRIVATE libmembus::libmembus)
+```
+
+Point CMake at a non-system prefix with `-DCMAKE_PREFIX_PATH=/path/to/prefix`.
 
 Examples are built by default. Disable them with:
 
@@ -389,6 +405,8 @@ std::string msg2 = rx.read(0);
 | Empty string, `*pOverrun = false` | Timed out with no message |
 | Empty string, `*pOverrun = true` | Reader was lapped; position resynced — call `read()` again |
 
+**`poll()`** — non-blocking check; returns `true` if at least one message is waiting to be read.  Reads the write pointer without acquiring the mutex, so the result may be momentarily stale; false wakeups are rare and acceptable.  Intended for use with `mmb::select()`.
+
 Notes:
 - Both sides must open with the same `size` or the attach will fail.
 - Attach also fails if an existing share is too small for the requested queue layout.
@@ -447,6 +465,30 @@ mmb::memvid::vidview frame = consumer.getBuf(rPos);
 | `getFrameSeq(idx)` | Sequence number stamped in slot `idx`; 0 means never written |
 | `getSessionId()` | Random ID written at share creation; changes on every writer restart |
 | `waitForFrame(wait_ms, lastSeq)` | Poll until `getSeq() > lastSeq` or timeout |
+
+**Presentation timestamps:**
+
+Each frame slot carries two independent 64-bit timestamp fields — `vpts` (video) and `apts` (companion audio).  The values are application-defined; the library stores and retrieves them verbatim.  Write them after filling pixel data and before calling `next()`.
+
+| Method | Description |
+|--------|-------------|
+| `setVpts(idx, pts)` | Write the video presentation timestamp into slot `idx` |
+| `getVpts(idx)` | Read the video presentation timestamp from slot `idx` |
+| `setApts(idx, pts)` | Write the audio presentation timestamp into slot `idx` |
+| `getApts(idx)` | Read the audio presentation timestamp from slot `idx` |
+
+```cpp
+// Writer
+producer.fill(slot, 0x00);
+producer.setVpts(slot, video_pts_us);
+producer.setApts(slot, audio_pts_us);
+producer.next(1);
+
+// Reader
+auto frame = consumer.getBuf(rPos);
+int64_t vpts = consumer.getVpts(rPos);
+int64_t apts = consumer.getApts(rPos);
+```
 
 **Metadata:**
 
@@ -509,6 +551,8 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 
 **Buffer size note:** the samples-per-frame count is computed as `⌈sampleRate / fps⌉` (ceiling division).  This ensures each buffer holds at least one full frame's worth of audio even when the rates do not divide evenly, preventing long-running clock drift.  `getBufSize()` returns the actual byte count per buffer.
 
+**Wire-format note:** the `memaud` frame header grew from 16 bytes to 24 bytes to accommodate the `fv_pts` timestamp field.  Shares created by older versions of the library cannot be opened by this version (layout validation will reject them).
+
 **Metadata:**
 
 | Method | Description |
@@ -521,6 +565,15 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 | `getFps()` | Buffers per second |
 | `getBufs()` | Number of slots in the ring |
 | `getBufSize()` | Bytes per buffer |
+
+**Presentation timestamp:**
+
+Each buffer slot carries a single 64-bit `pts` field.  Write it after filling sample data and before calling `next()`.
+
+| Method | Description |
+|--------|-------------|
+| `setPts(idx, pts)` | Write the presentation timestamp into slot `idx` |
+| `getPts(idx)` | Read the presentation timestamp from slot `idx` |
 
 The pointer/sequence/session helpers (`setPtr`, `getPtr`, `next`, `getPtrErr`, `getSeq`, `getFrameSeq`, `getSessionId`) work identically to the `memvid` equivalents.
 `waitForFrame(wait_ms, lastSeq)` is also available and follows the same polling semantics.
@@ -584,6 +637,8 @@ Frame records in the ring are padded to 8-byte alignment (same as `memmsg`); sha
 | Non-empty string, `*pOverrun = false` | Command received normally |
 | Empty string, `*pOverrun = false` | Timed out with no command |
 | Empty string, `*pOverrun = true` | Reader was lapped; position resynced — call `read()` again |
+
+**`poll()`** — non-blocking check; returns `true` if at least one command is waiting to be read.  Reads the write pointer without acquiring the mutex; intended for use with `mmb::select()`.
 
 **`readerCount()`** — number of handles currently opened with `bReader=true`. Treat as a hint; may be temporarily stale if a reader crashed before calling `close()`.
 
@@ -660,6 +715,50 @@ changed = reader.getChanged(100, epoch);    // blocks up to 100 ms
 
 ---
 
+### select — wait on multiple sources
+
+`mmb::select()` blocks until any one of a list of conditions becomes true, or a timeout expires.  Conditions are polled round-robin at ~1 ms intervals, making it suitable for any mix of source types without requiring a unified wake-up mechanism.
+
+```cpp
+mmb::memvid_reader  vid;  vid.open("/video");
+mmb::memcmd_receiver cmd; cmd.open("/commands", 4096);
+
+int64_t vidSeq = vid.raw().getSeq();
+
+while (running) {
+    int idx = mmb::select(/*wait_ms=*/100, {
+        [&]{ return vid.raw().getSeq() > vidSeq; },  // index 0 — new video frame
+        [&]{ return cmd.raw().poll(); }               // index 1 — new command
+    });
+
+    if (idx == 0) {
+        auto frame = vid.readNext();
+        // ... process frame.m_ptr ...
+        vidSeq = vid.raw().getSeq();
+    }
+    if (idx == 1) {
+        std::string c = cmd.read(0);
+        // ... handle command ...
+    }
+    // idx == -1 means the 100 ms timeout elapsed with nothing ready
+}
+```
+
+`mmb::select(wait_ms, conditions)` returns the **zero-based index** of the first ready condition, or **-1** on timeout.  Pass `wait_ms = 0` for a single non-blocking pass.
+
+The conditions list may hold any `bool()` callable, so any source type works:
+
+| Source type | Readiness condition |
+|---|---|
+| `memvid` / `memaud` | `vid.getSeq() > lastSeq` |
+| `memmsg` / `memcmd` | `q.poll()` |
+| `memkv` | `kv.getEpoch() > lastEpoch` |
+| Custom | Any `std::function<bool()>` |
+
+A `std::vector<std::function<bool()>>` overload is also provided for dynamically assembled condition lists.
+
+---
+
 ### sys — signal handling
 
 ```cpp
@@ -687,10 +786,10 @@ The core classes remain available directly, but `libmembus.h` also includes smal
 | `memmsg_reader` | `memmsg` | Attaches/reads a message queue |
 | `memcmd_sender` | `memcmd` | Attaches and writes commands |
 | `memcmd_receiver` | `memcmd` | Creates/attaches as a registered command reader |
-| `memvid_writer` | `memvid` | Creates a video ring and publishes frames |
-| `memvid_reader` | `memvid` | Opens an existing video ring, tracks position, detects overrun |
-| `memaud_writer` | `memaud` | Creates an audio ring and publishes buffers |
-| `memaud_reader` | `memaud` | Opens an existing audio ring, tracks position, detects overrun |
+| `memvid_writer` | `memvid` | Creates a video ring; publishes frames with optional `setVpts`/`setApts` |
+| `memvid_reader` | `memvid` | Opens an existing video ring; `readNext()` caches timestamps in `lastVpts()`/`lastApts()` |
+| `memaud_writer` | `memaud` | Creates an audio ring; publishes buffers with optional `setPts` |
+| `memaud_reader` | `memaud` | Opens an existing audio ring; `readNext()` caches the timestamp in `lastPts()` |
 
 Example:
 
@@ -706,6 +805,8 @@ std::string cmd = receiver.read(100);
 ```
 
 The wrappers intentionally stay thin. Call `raw()` when you need direct access to the underlying object.
+
+The `memvid_writer` timestamp helpers write to the **current write slot** (the slot that will be published on the next `next()` call).  The `memvid_reader` and `memaud_reader` helpers cache the timestamps from the most recently returned slot so they can be read after `readNext()` returns.
 
 `memaud_writer::open` does not accept a `bNew` parameter — `memaud::open` always removes and recreates the share when `bCreate=true`.  Use `memaud::remove(name)` explicitly beforehand if you need conditional teardown.
 
@@ -784,9 +885,16 @@ They are intentionally small and cover the common happy-path setup for each abst
 
 ## Performance
 
-Benchmarks are local shared-memory tests. They are useful for comparing operation costs inside this library, but results vary significantly by CPU, kernel, compiler, build type, scheduler noise, and payload size. The current harness is intentionally simple and focuses on throughput; cross-process latency percentiles are a good future extension.
+The benchmark harness covers two categories:
 
-Run the benchmark and regenerate the README artifacts:
+**Throughput** — single-process, in-memory loops that measure raw ops/sec and MiB/sec.  Useful for comparing per-operation cost across API families; results vary with CPU, kernel, compiler flags, and scheduler noise.
+
+**Latency** — two-thread measurements that capture end-to-end timing percentiles (p50/p95/p99):
+
+- `memmsg round-trip latency` — a ping-pong between two threads sharing a message queue.  Each sample is the time from `write()` to the echo reply being received.  Dominated by two condvar wakeup / mutex-acquisition cycles (one per direction) and approximates real cross-process latency.
+- `select() wakeup latency` — time from a writer calling `next()` on a `memvid` ring to `mmb::select()` returning in the reader thread.  Because `select()` polls at 1 ms intervals the distribution is roughly uniform over [0, 1 ms], so the p50 sits near 500 µs and the p99 sits near the poll interval ceiling.
+
+Run the benchmarks and regenerate the artifacts:
 
 ```bash
 ./build/bench/bench-libmembus --duration-ms 1000 --json bench/results/latest.json
@@ -797,6 +905,8 @@ python3 bench/plot_results.py bench/results/latest.json bench/results
 
 ![Data throughput](bench/results/throughput_mib.svg)
 
+![Latency p50 / p99](bench/results/latency.svg)
+
 Latest generated summary:
 
 <!-- BEGIN BENCHMARK SUMMARY -->
@@ -806,16 +916,25 @@ Benchmark duration: `500 ms` per case
 
 System: `Linux 6.18.5+kali-amd64 x86_64`
 
+**Throughput** (higher is better):
+
 | Benchmark | Payload | Ops/sec | MiB/sec | ns/op |
 |---|---:|---:|---:|---:|
-| memmap read/write | 64 KiB | 397.12K | 49640.6 | 2518.1 |
-| memmsg single writer/reader | 64 B | 7.40M | 451.6 | 135.2 |
-| memcmd 4 writers/1 reader | 64 B | 7.45M | 454.9 | 134.2 |
-| memkv setValue | 64 B value | 10.28M | 627.2 | 97.3 |
-| memkv getValue | 64 B value | 31.39M | 1916.0 | 31.9 |
-| memvid publish | 640x480 | 46.55K | 40911.0 | 21483.4 |
-| memvid publish | 1920x1080 | 3.87K | 22965.1 | 258332.0 |
-| memaud publish | stereo S16LE 48k/100fps | 18.65M | 34153.3 | 53.6 |
+| memmap read/write | 64 KiB | 429.98K | 53747.4 | 2325.7 |
+| memmsg single writer/reader | 64 B | 7.80M | 476.1 | 128.2 |
+| memcmd 4 writers/1 reader | 64 B | 7.39M | 451.2 | 135.3 |
+| memkv setValue | 64 B value | 10.40M | 635.0 | 96.1 |
+| memkv getValue | 64 B value | 33.97M | 2073.5 | 29.4 |
+| memvid publish | 640x480 | 45.63K | 40105.2 | 21915.0 |
+| memvid publish | 1920x1080 | 3.67K | 21787.6 | 272293.0 |
+| memaud publish | stereo S16LE 48k/100fps | 20.04M | 36701.2 | 49.9 |
+
+**Latency** (lower is better):
+
+| Benchmark | Payload | Samples | p50 µs | p95 µs | p99 µs |
+|---|---:|---:|---:|---:|---:|
+| memmsg round-trip latency | 64 B | 115255 | 4 | 6 | 7 |
+| select() wakeup latency | 1 memvid source | 99 | 551 | 1138 | 1192 |
 <!-- END BENCHMARK SUMMARY -->
 
 Generated files:
@@ -824,6 +943,7 @@ Generated files:
 - `bench/results/summary.md`
 - `bench/results/throughput_ops.svg`
 - `bench/results/throughput_mib.svg`
+- `bench/results/latency.svg`
 
 ---
 

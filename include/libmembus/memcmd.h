@@ -104,6 +104,15 @@ public:
      */
     std::string read(uint64_t wait_ms, bool *pOverrun = nullptr);
 
+    /** Non-blocking check: returns true if at least one command is waiting.
+     *
+     *  Reads the write pointer without acquiring the mutex, so the result may
+     *  be momentarily stale.  Acceptable for use in mmb::select() polling loops.
+     *
+     *  @returns true if m_nRead differs from the current write position.
+     */
+    bool poll();
+
     /** Return the number of handles currently registered as readers.
      *
      *  Treat as a hint: the count may be temporarily stale if a reader process

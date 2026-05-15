@@ -4,13 +4,22 @@ Benchmark duration: `500 ms` per case
 
 System: `Linux 6.18.5+kali-amd64 x86_64`
 
+**Throughput** (higher is better):
+
 | Benchmark | Payload | Ops/sec | MiB/sec | ns/op |
 |---|---:|---:|---:|---:|
-| memmap read/write | 64 KiB | 397.12K | 49640.6 | 2518.1 |
-| memmsg single writer/reader | 64 B | 7.40M | 451.6 | 135.2 |
-| memcmd 4 writers/1 reader | 64 B | 7.45M | 454.9 | 134.2 |
-| memkv setValue | 64 B value | 10.28M | 627.2 | 97.3 |
-| memkv getValue | 64 B value | 31.39M | 1916.0 | 31.9 |
-| memvid publish | 640x480 | 46.55K | 40911.0 | 21483.4 |
-| memvid publish | 1920x1080 | 3.87K | 22965.1 | 258332.0 |
-| memaud publish | stereo S16LE 48k/100fps | 18.65M | 34153.3 | 53.6 |
+| memmap read/write | 64 KiB | 429.98K | 53747.4 | 2325.7 |
+| memmsg single writer/reader | 64 B | 7.80M | 476.1 | 128.2 |
+| memcmd 4 writers/1 reader | 64 B | 7.39M | 451.2 | 135.3 |
+| memkv setValue | 64 B value | 10.40M | 635.0 | 96.1 |
+| memkv getValue | 64 B value | 33.97M | 2073.5 | 29.4 |
+| memvid publish | 640x480 | 45.63K | 40105.2 | 21915.0 |
+| memvid publish | 1920x1080 | 3.67K | 21787.6 | 272293.0 |
+| memaud publish | stereo S16LE 48k/100fps | 20.04M | 36701.2 | 49.9 |
+
+**Latency** (lower is better):
+
+| Benchmark | Payload | Samples | p50 µs | p95 µs | p99 µs |
+|---|---:|---:|---:|---:|---:|
+| memmsg round-trip latency | 64 B | 115255 | 4 | 6 | 7 |
+| select() wakeup latency | 1 memvid source | 99 | 551 | 1138 | 1192 |

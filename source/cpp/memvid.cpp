@@ -244,6 +244,64 @@ bool memvid::waitForFrame(uint64_t wait_ms, int64_t lastSeq)
     return false;
 }
 
+namespace
+{
+    // Shared helper: validates slot bounds and returns a pointer to the
+    // requested field within the frame header, or nullptr on failure.
+    int64_t *slotField(char *p, int64_t mappedSize,
+                       int64_t hv_last_val, int64_t fieldOffset,
+                       int64_t bufs, int64_t blockSz, int64_t idx)
+    {
+        if (bufs <= 0 || blockSz <= 0) return nullptr;
+        idx = ((idx % bufs) + bufs) % bufs;
+        int64_t off = hv_last_val + idx * blockSz + fieldOffset;
+        if (off < 0 || off + (int64_t)sizeof(int64_t) > mappedSize) return nullptr;
+        return reinterpret_cast<int64_t *>(p + off);
+    }
+}
+
+bool memvid::setVpts(int64_t idx, int64_t pts)
+{
+    char *p = m_mem.data();
+    if (!p) return false;
+    int64_t bufs = *(int64_t*)(p + hv_bufs), blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t *field = slotField(p, m_mem.size(), hv_last, fv_vpts, bufs, blockSz, idx);
+    if (!field) return false;
+    std::atomic_ref<int64_t>(*field).store(pts, std::memory_order_relaxed);
+    return true;
+}
+
+bool memvid::setApts(int64_t idx, int64_t pts)
+{
+    char *p = m_mem.data();
+    if (!p) return false;
+    int64_t bufs = *(int64_t*)(p + hv_bufs), blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t *field = slotField(p, m_mem.size(), hv_last, fv_apts, bufs, blockSz, idx);
+    if (!field) return false;
+    std::atomic_ref<int64_t>(*field).store(pts, std::memory_order_relaxed);
+    return true;
+}
+
+int64_t memvid::getVpts(int64_t idx)
+{
+    char *p = m_mem.data();
+    if (!p) return 0;
+    int64_t bufs = *(int64_t*)(p + hv_bufs), blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t *field = slotField(p, m_mem.size(), hv_last, fv_vpts, bufs, blockSz, idx);
+    if (!field) return 0;
+    return std::atomic_ref<int64_t>(*field).load(std::memory_order_relaxed);
+}
+
+int64_t memvid::getApts(int64_t idx)
+{
+    char *p = m_mem.data();
+    if (!p) return 0;
+    int64_t bufs = *(int64_t*)(p + hv_bufs), blockSz = *(int64_t*)(p + hv_blocksz);
+    int64_t *field = slotField(p, m_mem.size(), hv_last, fv_apts, bufs, blockSz, idx);
+    if (!field) return 0;
+    return std::atomic_ref<int64_t>(*field).load(std::memory_order_relaxed);
+}
+
 int64_t memvid::getSessionId()
 {
     char *p = m_mem.data();

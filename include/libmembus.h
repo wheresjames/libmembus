@@ -35,4 +35,5 @@ namespace LIBMEMBUS_NS
 #include "libmembus/memcmd.h"
 #include "libmembus/memkv.h"
 #include "libmembus/helpers.h"
+#include "libmembus/select.h"
 

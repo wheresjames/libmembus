@@ -242,6 +242,63 @@ TEST_CASE("MemVid", "[memvid]")
         REQUIRE_THROWS(reader.getBuf(1));
     }
 
+    SECTION("setVpts / getVpts / setApts / getApts round-trip")
+    {
+        mmb::memvid vid;
+        REQUIRE(vid.open("/memvid_pts", true, 16, 8, mmb::video_format::rgb24, 30, 4));
+
+        // All slots start at zero
+        REQUIRE(vid.getVpts(0) == 0);
+        REQUIRE(vid.getApts(0) == 0);
+
+        // Write timestamps to slot 0
+        REQUIRE(vid.setVpts(0, 1234567890LL));
+        REQUIRE(vid.setApts(0, 9876543210LL));
+        REQUIRE(vid.getVpts(0) == 1234567890LL);
+        REQUIRE(vid.getApts(0) == 9876543210LL);
+
+        // Other slots unchanged
+        REQUIRE(vid.getVpts(1) == 0);
+        REQUIRE(vid.getApts(1) == 0);
+
+        // Index wraps correctly: slot 4 wraps to slot 0 (bufs=4)
+        REQUIRE(vid.getVpts(4) == 1234567890LL);
+
+        // Negative timestamps are stored verbatim
+        REQUIRE(vid.setVpts(1, -1));
+        REQUIRE(vid.getVpts(1) == -1);
+    }
+
+    SECTION("setVpts / setApts survive next() without being overwritten")
+    {
+        // next() only stamps fv_seq; it must not disturb fv_vpts / fv_apts.
+        mmb::memvid vid;
+        REQUIRE(vid.open("/memvid_pts_next", true, 8, 4, mmb::video_format::gray8, 30, 3));
+        REQUIRE(vid.setVpts(0, 42));
+        REQUIRE(vid.setApts(0, 99));
+        vid.next(1);  // stamps seq on slot 0, advances ptr to 1
+        REQUIRE(vid.getVpts(0) == 42);
+        REQUIRE(vid.getApts(0) == 99);
+    }
+
+    SECTION("memvid_reader exposes lastVpts() and lastApts() after readNext()")
+    {
+        mmb::memvid_writer vw;
+        REQUIRE(vw.open("/memvid_pts_reader", 8, 4, mmb::video_format::gray8, 30, 3));
+
+        mmb::memvid_reader vr;
+        REQUIRE(vr.open("/memvid_pts_reader"));
+
+        REQUIRE(vw.setVpts(1000000LL));
+        REQUIRE(vw.setApts(2000000LL));
+        vw.next(1);
+
+        REQUIRE(vr.wait(100));
+        vr.readNext();
+        REQUIRE(vr.lastVpts() == 1000000LL);
+        REQUIRE(vr.lastApts() == 2000000LL);
+    }
+
     SECTION("Overrun detection: lag = getSeq() - rLastSeq >= getBufs()")
     {
         // 4-slot ring buffer.  The reader is lapped when the writer is a full ring

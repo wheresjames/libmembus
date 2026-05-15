@@ -336,6 +336,43 @@ public:
      */
     int64_t getSessionId();
 
+    /** Write the video presentation timestamp for slot @p idx.
+     *
+     *  Call before next() so the timestamp is visible to readers after they
+     *  observe the new sequence number.  The value is application-defined;
+     *  the library does not interpret it.
+     *
+     *  @param idx  Slot index; wrapped modulo getBufs().
+     *  @param pts  Timestamp value (microseconds, nanoseconds, or any epoch
+     *              the application uses — the library stores it verbatim).
+     *  @returns true on success; false if not open or the slot is out of bounds.
+     */
+    bool setVpts(int64_t idx, int64_t pts);
+
+    /** Write the companion audio presentation timestamp for slot @p idx.
+     *
+     *  Useful when a video frame and its audio block share the same ring slot
+     *  and the application wants to carry both timestamps in one place.
+     *  Call before next().
+     *
+     *  @param idx  Slot index; wrapped modulo getBufs().
+     *  @param pts  Audio presentation timestamp.
+     *  @returns true on success; false if not open or the slot is out of bounds.
+     */
+    bool setApts(int64_t idx, int64_t pts);
+
+    /** Return the video presentation timestamp stored in slot @p idx.
+     *  @param idx  Slot index; wrapped modulo getBufs().
+     *  @returns The stored vpts value, or 0 if not open or out of bounds.
+     */
+    int64_t getVpts(int64_t idx);
+
+    /** Return the audio presentation timestamp stored in slot @p idx.
+     *  @param idx  Slot index; wrapped modulo getBufs().
+     *  @returns The stored apts value, or 0 if not open or out of bounds.
+     */
+    int64_t getApts(int64_t idx);
+
     /** Return the global monotonic write-sequence counter.
      *
      *  Incremented by every next() call.  Readers use this together with the

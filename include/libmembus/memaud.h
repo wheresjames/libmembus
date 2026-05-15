@@ -152,13 +152,18 @@ public:
 
     /** Byte offsets of fields within a single buffer slot, relative to the slot start.
      *
-     *  Layout: [fv_size : int64_t][fv_seq : int64_t][PCM sample data...]
+     *  Layout: [fv_size : int64_t][fv_pts : int64_t][fv_seq : int64_t][PCM sample data...]
+     *
+     *  @note The addition of @c fv_pts changed @c fv_last from 16 to 24 bytes.
+     *        Shares created by versions of the library that lacked this field
+     *        will fail layout validation and cannot be opened by this version.
      */
     enum FrameHeaderVal
     {
         fv_size         = 0,                   ///< int64_t: (reserved; matches slot position in ring).
-        fv_seq          = 1 * sizeof(int64_t), ///< int64_t: sequence number stamped by next() when this slot was published.
-        fv_last         = 2 * sizeof(int64_t)  ///< Total per-slot header size; PCM data begins at this offset.
+        fv_pts          = 1 * sizeof(int64_t), ///< int64_t: presentation timestamp (application-defined); set before next().
+        fv_seq          = 2 * sizeof(int64_t), ///< int64_t: sequence number stamped by next() when this slot was published.
+        fv_last         = 3 * sizeof(int64_t)  ///< Total per-slot header size; PCM data begins at this offset.
     };
 
 public:
@@ -319,6 +324,24 @@ public:
      *  @returns Session ID, or 0 if not open.
      */
     int64_t getSessionId();
+
+    /** Write the presentation timestamp for slot @p idx.
+     *
+     *  Call before next() so the timestamp is visible to readers after they
+     *  observe the new sequence number.
+     *
+     *  @param idx  Slot index; wrapped modulo getBufs().
+     *  @param pts  Timestamp value (microseconds, nanoseconds, or any epoch
+     *              the application uses — the library stores it verbatim).
+     *  @returns true on success; false if not open or the slot is out of bounds.
+     */
+    bool setPts(int64_t idx, int64_t pts);
+
+    /** Return the presentation timestamp stored in slot @p idx.
+     *  @param idx  Slot index; wrapped modulo getBufs().
+     *  @returns The stored pts value, or 0 if not open or out of bounds.
+     */
+    int64_t getPts(int64_t idx);
 
     /** Return the global monotonic write-sequence counter.
      *

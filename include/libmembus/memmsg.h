@@ -93,6 +93,17 @@ public:
      */
     std::string read(uint64_t wait, bool *pOverrun = nullptr);
 
+    /** Non-blocking check: returns true if at least one message is waiting.
+     *
+     *  Reads the write pointer without acquiring the mutex, so the result may
+     *  be momentarily stale.  False wakeups (spurious true) and missed wakeups
+     *  (spurious false) are both possible but rare and acceptable in
+     *  mmb::select() polling loops.
+     *
+     *  @returns true if m_nRead differs from the current write position.
+     */
+    bool poll();
+
     /** Returns true if this handle attached to an already-existing share.
      *  @returns false if this handle created the queue; true if it attached.
      */

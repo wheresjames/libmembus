@@ -289,6 +289,15 @@ std::string memmsg::read(uint64_t wait, bool *pOverrun)
     return val;
 }
 
+bool memmsg::poll()
+{
+    char *p = m_mem.data();
+    if (!p) return false;
+    int64_t write = std::atomic_ref<int64_t>(*(int64_t*)(p + hv_write))
+                        .load(std::memory_order_acquire);
+    return m_nRead != write;
+}
+
 int64_t memmsg::getSessionId()
 {
     char *p = m_mem.data();
