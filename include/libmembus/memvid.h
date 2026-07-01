@@ -17,7 +17,10 @@ enum class video_format : int64_t
     rgba32,      ///< 32-bit RGBA packed; 4 bytes per pixel.
     bgra32,      ///< 32-bit BGRA packed; 4 bytes per pixel.
     yuyv422,     ///< YUV 4:2:2 packed, YUYV byte order; 2 bytes per pixel; requires even width.
-    uyvy422      ///< YUV 4:2:2 packed, UYVY byte order; 2 bytes per pixel; requires even width.
+    uyvy422,     ///< YUV 4:2:2 packed, UYVY byte order; 2 bytes per pixel; requires even width.
+
+    userType = 0x1000 ///< Opaque / custom fixed-size format; identity carried in hv_fourcc / hv_guid,
+                      ///< geometry supplied by the caller (scanwidth). See MB-MEMPKT.md §3.
 };
 
 /** Return the name string for a video_format enum value (e.g. "RGB24").
@@ -28,7 +31,7 @@ const char *video_format_name(video_format fmt);
 
 /** Return the number of bytes per pixel for a video_format.
  *  @param fmt  Format to query.
- *  @returns Bytes per pixel, or 0 for unrecognised values.
+ *  @returns Bytes per pixel, or 0 for unrecognised or opaque (userType) values.
  */
 int64_t video_format_bytes_per_pixel(video_format fmt);
 
@@ -39,12 +42,22 @@ int64_t video_format_bytes_per_pixel(video_format fmt);
  *  the write pointer and per-frame sequence numbers independently with no
  *  synchronisation between readers.
  *
- *  Overrun detection: compare getSeq() - rLastSeq against getBufs().  When the
- *  difference is >= getBufs() the writer has lapped the reader.
+ *  Single-writer, multiple-reader (SPMC).  Overrun detection: compare
+ *  getSeq() - rLastSeq against getBufs().  When the difference is >= getBufs()
+ *  the writer has lapped the reader.
  */
 class memvid
 {
 public:
+
+    /// Shared class discriminator written to hv_type.  See MB-MEMPKT.md §10.1.
+    static const int64_t k_type    = 1;      ///< memvid
+    /// Shared-memory magic constant written to hv_magic ('MBUS').
+    static const int64_t k_magic   = 0x5355424dLL;
+    /// Current header layout version written to hv_version.
+    static const int64_t k_version = 2;
+    /// Default payload alignment when the caller passes 0.
+    static const int64_t k_defAlign = 64;
 
     /** Round @p val up to the nearest multiple of @p unit.
      *  @param val   Value to round.
@@ -139,37 +152,59 @@ public:
 
     /** Byte offsets of fields in the shared-memory main header.
      *
-     *  These constants are public so that callers can inspect or corrupt-test
-     *  header fields via a raw memmap handle.  Normal usage goes through the
-     *  typed accessors (getWidth(), getSeq(), etc.).
+     *  The first block (hv_magic .. hv_reserved7) is the shared header prefix,
+     *  laid out identically in memvid, memaud and mempkt so a generic reader can
+     *  identify any share from magic/type/version without knowing the class
+     *  (MB-MEMPKT.md §10.1).  The class-specific fields follow.  hv_useroffset
+     *  and hv_dataoffset are values *computed at open()* and stored, not
+     *  structural constants — every slot accessor reads them.
      */
     enum HeaderVal
     {
-        hv_size         = 0,                      ///< int64_t: total allocated size including header and all frame slots.
-        hv_ptr          = 1 * sizeof(int64_t),    ///< int64_t: current write-pointer slot index (atomic).
-        hv_seq          = 2 * sizeof(int64_t),    ///< int64_t: monotonic write-sequence counter (atomic).
-        hv_id           = 3 * sizeof(int64_t),    ///< int64_t: random session ID; changes on every open(bCreate=true).
-        hv_width        = 4 * sizeof(int64_t),    ///< int64_t: frame width in pixels.
-        hv_height       = 5 * sizeof(int64_t),    ///< int64_t: frame height in pixels.
-        hv_scanwidth    = 6 * sizeof(int64_t),    ///< int64_t: scan width (bytes per row).
-        hv_format       = 7 * sizeof(int64_t),    ///< int64_t: video_format cast to int64_t.
-        hv_fps          = 8 * sizeof(int64_t),    ///< int64_t: nominal frames per second.
-        hv_bufs         = 9 * sizeof(int64_t),    ///< int64_t: number of frame slots in the ring.
-        hv_blocksz      = 10 * sizeof(int64_t),   ///< int64_t: size of one frame slot in bytes (fv_last + pixel data).
-        hv_last         = 11 * sizeof(int64_t)    ///< Total header size; frame data begins at this offset.
+        // ---- shared prefix (identical offsets in all classes) ----
+        hv_magic        =  0 * sizeof(int64_t),  ///< int64_t: k_magic; rejects non-libmembus segments.
+        hv_type         =  1 * sizeof(int64_t),  ///< int64_t: class discriminator (k_type).
+        hv_version      =  2 * sizeof(int64_t),  ///< int64_t: header layout version (k_version).
+        hv_size         =  3 * sizeof(int64_t),  ///< int64_t: total allocated size including header and all frame slots.
+        hv_ptr          =  4 * sizeof(int64_t),  ///< int64_t: current write-pointer slot index (atomic).
+        hv_seq          =  5 * sizeof(int64_t),  ///< int64_t: monotonic write-sequence counter (atomic).
+        hv_id           =  6 * sizeof(int64_t),  ///< int64_t: random session ID; changes on every open(bCreate=true).
+        hv_bufs         =  7 * sizeof(int64_t),  ///< int64_t: number of frame slots in the ring.
+        hv_fourcc       =  8 * sizeof(int64_t),  ///< int64_t: fourcc (low 32 bits); 0 = none.
+        hv_guid_lo      =  9 * sizeof(int64_t),  ///< int64_t: GUID bytes 0..7.
+        hv_guid_hi      = 10 * sizeof(int64_t),  ///< int64_t: GUID bytes 8..15.
+        hv_align        = 11 * sizeof(int64_t),  ///< int64_t: payload alignment (power of two, >= 8).
+        hv_metasize     = 12 * sizeof(int64_t),  ///< int64_t: main user buffer size in bytes (0 = none).
+        hv_reserved0    = 13 * sizeof(int64_t),  ///< int64_t: spare.
+        hv_reserved7    = 20 * sizeof(int64_t),  ///< int64_t: last spare slot.
+        hv_common_end   = 21 * sizeof(int64_t),  ///< End of shared prefix.
+
+        // ---- memvid class-specific ----
+        hv_width        = 21 * sizeof(int64_t),  ///< int64_t: frame width in pixels.
+        hv_height       = 22 * sizeof(int64_t),  ///< int64_t: frame height in pixels.
+        hv_scanwidth    = 23 * sizeof(int64_t),  ///< int64_t: scan width (bytes per row).
+        hv_format       = 24 * sizeof(int64_t),  ///< int64_t: video_format cast to int64_t.
+        hv_fps          = 25 * sizeof(int64_t),  ///< int64_t: nominal frames per second.
+        hv_blocksz      = 26 * sizeof(int64_t),  ///< int64_t: size of one frame slot in bytes (aligned).
+        hv_frameextra   = 27 * sizeof(int64_t),  ///< int64_t: per-frame user buffer stride in bytes (0 = none).
+        hv_useroffset   = 28 * sizeof(int64_t),  ///< int64_t: computed base offset of PERFRAMEUSERBUF region.
+        hv_dataoffset   = 29 * sizeof(int64_t),  ///< int64_t: computed base offset of PERFRAMEDATABUFFER region.
+        hv_last         = 30 * sizeof(int64_t)   ///< Total fixed header size; MAINUSERBUF begins here.
     };
 
     /** Byte offsets of fields within a single frame slot, relative to the slot start.
      *
-     *  Layout: [fv_size : int64_t][fv_vpts : int64_t][fv_apts : int64_t][fv_seq : int64_t][pixel data...]
+     *  Layout: [fv_size][fv_vpts][fv_apts][fv_userlen][fv_seq] then padding up to
+     *  hv_align, then pixel data.
      */
     enum FrameHeaderVal
     {
         fv_size         = 0,                   ///< int64_t: (reserved; matches slot position in ring).
         fv_vpts         = 1 * sizeof(int64_t), ///< int64_t: video presentation timestamp (application-defined).
         fv_apts         = 2 * sizeof(int64_t), ///< int64_t: audio presentation timestamp (application-defined).
-        fv_seq          = 3 * sizeof(int64_t), ///< int64_t: sequence number stamped by next() when this slot was published.
-        fv_last         = 4 * sizeof(int64_t)  ///< Total per-frame header size; pixel data begins at this offset.
+        fv_userlen      = 3 * sizeof(int64_t), ///< int64_t: used bytes in this slot's PERFRAMEUSERBUF entry.
+        fv_seq          = 4 * sizeof(int64_t), ///< int64_t: sequence number stamped by next() when this slot was published.
+        fv_last         = 5 * sizeof(int64_t)  ///< Per-frame header size; padded up to hv_align before pixel data.
     };
 
 public:
@@ -182,31 +217,41 @@ public:
 
     /** Create or attach to a video ring buffer.
      *
-     *  When bCreate=true, any existing share with the same name is removed and
-     *  recreated.  When attaching to an existing share all layout parameters
-     *  must match exactly or the call fails.
+     *  The trailing parameters are additive and default to today's behaviour, so
+     *  existing callers are source-compatible (MB-MEMPKT.md §3.2).
      *
-     *  @param sName    Share name (POSIX: must start with '/').
-     *  @param bCreate  Create the share.  Pass false to attach to an existing one.
-     *  @param w        Frame width in pixels.
-     *  @param h        Frame height in pixels.
-     *  @param fmt      Pixel format.
-     *  @param fps      Nominal frames per second (must be > 0).
-     *  @param bufs     Number of frame slots in the ring (must be > 0).
+     *  @param sName      Share name (POSIX: must start with '/').
+     *  @param bCreate    Create the share.  Pass false to attach to an existing one.
+     *  @param w          Frame width in pixels.
+     *  @param h          Frame height in pixels.
+     *  @param fmt        Pixel format.
+     *  @param fps        Nominal frames per second (must be > 0).
+     *  @param bufs       Number of frame slots in the ring (must be > 0).
+     *  @param scanwidth  Bytes per row.  Required (> 0) for video_format::userType;
+     *                    pass 0 to derive from fmt for known formats.
+     *  @param align      Payload alignment (power of two, >= 8); 0 = default 64.
+     *  @param frameextra Per-frame user buffer size in bytes (0 = none).
+     *  @param fourcc     Fourcc identity (0 = none).
+     *  @param guid       Optional 16-byte GUID identity (null = none).
+     *  @param meta       Optional main user buffer bytes copied in at create.
+     *  @param metasz     Size of @p meta in bytes (0 = none).
      *  @returns true on success; false on failure (see last_error()).
      */
     bool open(const std::string &sName, bool bCreate,
               int64_t w, int64_t h, video_format fmt,
-              int64_t fps, int64_t bufs);
+              int64_t fps, int64_t bufs,
+              int64_t scanwidth = 0, int64_t align = 0, int64_t frameextra = 0,
+              uint32_t fourcc = 0, const uint8_t *guid = nullptr,
+              const void *meta = nullptr, int64_t metasz = 0);
 
     /** Attach to an existing video ring buffer without knowing its parameters.
      *
-     *  Validates the header before mapping.  Maps the segment read-only
-     *  (least-privilege); writing through vidview::m_ptr is undefined behaviour.
+     *  Validates magic/type and the header before mapping.  Maps the segment
+     *  read-only (least-privilege); writing through vidview::m_ptr is undefined.
      *
      *  @param sName  Share name (POSIX: must start with '/').
-     *  @returns true on success; false if the share does not exist or has an
-     *           invalid/inconsistent header (errc::invalid_layout).
+     *  @returns true on success; false if the share does not exist, is the wrong
+     *           type, or has an invalid/inconsistent header.
      */
     bool open_existing(const std::string &sName);
 
@@ -226,177 +271,103 @@ public:
     bool existing() { return m_mem.existing(); }
 
     /** Return a view of the frame slot at ring index @p idx.
-     *
-     *  The index is wrapped modulo getBufs() so any integer offset is valid.
-     *  Header fields are snapshotted at call time and the resulting offset is
-     *  bounds-checked against the mapped size before the pointer is returned.
-     *
      *  @param idx  Slot index; wrapped with full modulo arithmetic.
      *  @returns vidview pointing into the mapped pixel data for slot idx.
-     *  @throws std::exception if the handle is not open or the computed slot
-     *          address falls outside the mapped region (TOCTOU guard).
+     *  @throws std::exception if not open or the computed slot address is out of bounds.
      */
     vidview getBuf(int64_t idx) noexcept(false);
 
     /** Fill a frame slot with a constant byte value.
-     *
      *  @param idx  Slot index; wrapped modulo getBufs().
      *  @param col  Byte value to write across the entire pixel buffer.
-     *  @returns true on success; false if the handle is not open or the
-     *           computed slot address is out of bounds.
+     *  @returns true on success; false on failure.
      */
     bool fill(int64_t idx, int col);
 
-    /** Return the number of frame slots in the ring.
-     *  @returns Slot count, or 0 if not open.
-     */
+    /** Return the number of frame slots in the ring.  0 if not open. */
     int64_t getBufs();
 
-    /** Return the current write-pointer slot index offset by @p offset.
-     *
-     *  Equivalent to (ptr + offset) % bufs with full wrap-around for large
-     *  or negative offsets.
-     *
-     *  @param offset  Signed offset from the current write pointer.
-     *  @returns Wrapped slot index, or -1 if not open.
-     */
+    /** Return the current write-pointer slot index offset by @p offset.  -1 if not open. */
     int64_t getPtr(int64_t offset);
 
-    /** Set the write-pointer slot index to @p ptr (wrapped modulo getBufs()).
-     *  @param ptr  New write-pointer value.
-     *  @returns The resulting wrapped slot index, or -1 if not open.
-     */
+    /** Set the write-pointer slot index to @p ptr (wrapped modulo getBufs()). */
     int64_t setPtr(int64_t ptr);
 
-    /** Return the signed circular distance from (ptr + bias) to @p pos.
-     *
-     *  Useful for phase-lock feedback: a positive result means pos is ahead of
-     *  the biased pointer; negative means it is behind.
-     *
-     *  @param pos   Target slot index.
-     *  @param bias  Offset added to the current write pointer before computing
-     *               the distance.
-     *  @returns Signed distance in the range [-(bufs/2), bufs/2].
-     */
+    /** Return the signed circular distance from (ptr + bias) to @p pos. */
     int64_t getPtrErr(int64_t pos, int64_t bias);
 
-    /** Stamp the current slot's sequence number, then advance the write pointer by @p inc.
-     *
-     *  The sequence number is incremented atomically before the pointer moves so
-     *  that readers can detect overrun by comparing getSeq() - rLastSeq against
-     *  getBufs().
-     *
-     *  @param inc  Number of slots to advance the write pointer (normally 1).
-     *  @returns The new write-pointer slot index after advancing, or -1 if not open.
-     */
+    /** Stamp the current slot's sequence number, then advance the write pointer by @p inc. */
     int64_t next(int64_t inc);
 
-    /** Poll until getSeq() advances beyond @p lastSeq or @p wait_ms elapses.
-     *
-     *  Sleeps 1 ms between polls to avoid busy-waiting.
-     *
-     *  @param wait_ms  Maximum milliseconds to wait.  Pass 0 for a single
-     *                  non-blocking check.
-     *  @param lastSeq  Sequence value to wait beyond.
-     *  @returns true if getSeq() > lastSeq within the timeout; false on timeout
-     *           (errc::timeout).
-     */
+    /** Poll until getSeq() advances beyond @p lastSeq or @p wait_ms elapses. */
     bool waitForFrame(uint64_t wait_ms, int64_t lastSeq);
 
-    /** Return the frame width in pixels.
-     *  @returns Width, or -1 if not open.
-     */
+    /** Return the frame width in pixels.  -1 if not open. */
     int64_t getWidth();
 
-    /** Return the frame height in pixels.
-     *  @returns Height, or -1 if not open.
-     */
+    /** Return the frame height in pixels.  -1 if not open. */
     int64_t getHeight();
 
-    /** Return the pixel format stored in the header.
-     *  @returns Pixel format enum value, or (video_format)0 if not open.
-     */
+    /** Return the pixel format stored in the header. */
     video_format getFormat();
 
-    /** Return the pixel format name string (e.g. "RGB24").
-     *  @returns Pointer to a static null-terminated string.
-     */
+    /** Return the pixel format name string (e.g. "RGB24"). */
     const char *getFormatName();
 
-    /** Return the nominal frame rate stored in the header.
-     *  @returns Frames per second, or -1 if not open.
-     */
+    /** Return the nominal frame rate stored in the header.  -1 if not open. */
     int64_t getFps();
 
-    /** Return the random session ID written when the share was created.
-     *
-     *  Readers should save this on open and compare periodically.  A change
-     *  means the writer restarted and the reader must close() and reopen.
-     *  @returns Session ID, or 0 if not open.
-     */
+    /** Return the random session ID written when the share was created.  0 if not open. */
     int64_t getSessionId();
 
-    /** Write the video presentation timestamp for slot @p idx.
-     *
-     *  Call before next() so the timestamp is visible to readers after they
-     *  observe the new sequence number.  The value is application-defined;
-     *  the library does not interpret it.
-     *
-     *  @param idx  Slot index; wrapped modulo getBufs().
-     *  @param pts  Timestamp value (microseconds, nanoseconds, or any epoch
-     *              the application uses — the library stores it verbatim).
-     *  @returns true on success; false if not open or the slot is out of bounds.
-     */
+    /** Return the header layout version (hv_version).  -1 if not open. */
+    int64_t getVersion();
+
+    /** Return the payload alignment (hv_align).  0 if not open. */
+    int64_t getAlign();
+
+    /** Return the fourcc identity (low 32 bits).  0 if not open or none. */
+    uint32_t getFourcc();
+
+    /** Copy the 16-byte GUID identity into @p out.
+     *  @returns true if a non-zero GUID is present; false otherwise. */
+    bool getGuid(uint8_t out[16]);
+
+    /** Return a pointer to the main user metadata buffer, or null if none. */
+    const char *getMeta();
+
+    /** Return the size of the main user metadata buffer in bytes.  0 if none. */
+    int64_t getMetaSize();
+
+    /** Return the per-frame user buffer stride (hv_frameextra).  0 if none. */
+    int64_t getFrameExtra();
+
+    /** Copy up to getFrameExtra() bytes into slot @p idx's user buffer and set its length.
+     *  Call before next().  @returns true on success. */
+    bool setUserData(int64_t idx, const void *data, int64_t len);
+
+    /** Return a pointer to slot @p idx's per-frame user buffer, or null if none/out of bounds. */
+    const char *getUserData(int64_t idx);
+
+    /** Return the used length of slot @p idx's per-frame user buffer (fv_userlen). */
+    int64_t getUserLen(int64_t idx);
+
+    /** Write the video presentation timestamp for slot @p idx.  Call before next(). */
     bool setVpts(int64_t idx, int64_t pts);
 
-    /** Write the companion audio presentation timestamp for slot @p idx.
-     *
-     *  Useful when a video frame and its audio block share the same ring slot
-     *  and the application wants to carry both timestamps in one place.
-     *  Call before next().
-     *
-     *  @param idx  Slot index; wrapped modulo getBufs().
-     *  @param pts  Audio presentation timestamp.
-     *  @returns true on success; false if not open or the slot is out of bounds.
-     */
+    /** Write the companion audio presentation timestamp for slot @p idx.  Call before next(). */
     bool setApts(int64_t idx, int64_t pts);
 
-    /** Return the video presentation timestamp stored in slot @p idx.
-     *  @param idx  Slot index; wrapped modulo getBufs().
-     *  @returns The stored vpts value, or 0 if not open or out of bounds.
-     */
+    /** Return the video presentation timestamp stored in slot @p idx. */
     int64_t getVpts(int64_t idx);
 
-    /** Return the audio presentation timestamp stored in slot @p idx.
-     *  @param idx  Slot index; wrapped modulo getBufs().
-     *  @returns The stored apts value, or 0 if not open or out of bounds.
-     */
+    /** Return the audio presentation timestamp stored in slot @p idx. */
     int64_t getApts(int64_t idx);
 
-    /** Return the global monotonic write-sequence counter.
-     *
-     *  Incremented by every next() call.  Readers use this together with the
-     *  sequence number of the last frame they processed (rLastSeq) to measure
-     *  lag and detect overrun:
-     *  @code
-     *      int64_t lag    = vid.getSeq() - rLastSeq;
-     *      bool    lapped = lag >= vid.getBufs();
-     *  @endcode
-     *  @returns Current sequence counter, or -1 if not open.
-     */
+    /** Return the global monotonic write-sequence counter.  -1 if not open. */
     int64_t getSeq();
 
-    /** Return the sequence number most recently stamped into slot @p idx by next().
-     *
-     *  A value of 0 means the slot has never been written.  Use this to verify
-     *  that a slot contains the expected frame before reading it:
-     *  @code
-     *      bool ready   = vid.getFrameSeq(rPos) > rLastSeq;      // new data available
-     *      bool in_sync = vid.getFrameSeq(rPos) == rLastSeq + 1; // no frames skipped
-     *  @endcode
-     *  @param idx  Slot index; wrapped modulo getBufs().
-     *  @returns Per-slot sequence number, or -1 if not open or the header is invalid.
-     */
+    /** Return the sequence number most recently stamped into slot @p idx by next(). */
     int64_t getFrameSeq(int64_t idx);
 
 private:

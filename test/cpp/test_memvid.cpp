@@ -167,21 +167,17 @@ TEST_CASE("MemVid", "[memvid]")
         REQUIRE_FALSE(vid.open_existing("/memvid_zerohdr"));
     }
 
-    SECTION("open_existing rejects headers whose layout exceeds the mapped size")
+    SECTION("open_existing rejects headers whose declared size is inconsistent")
     {
-        mmb::memmap raw;
-        REQUIRE(raw.open("/memvid_badhdr", 128, true, true));
-        char *p = raw.data();
-        REQUIRE(p != nullptr);
+        // Create a valid share, then corrupt hv_size to a value that no longer
+        // matches the recomputed layout (and exceeds the mapped region).  The
+        // structural validation in open_existing must reject it.
+        mmb::memvid creator;
+        REQUIRE(creator.open("/memvid_badhdr", true, 16, 8, mmb::video_format::rgb24, 30, 2));
 
-        *(int64_t*)(p + mmb::memvid::hv_size)      = 4096;
-        *(int64_t*)(p + mmb::memvid::hv_width)     = 64;
-        *(int64_t*)(p + mmb::memvid::hv_height)    = 64;
-        *(int64_t*)(p + mmb::memvid::hv_scanwidth) = 192;
-        *(int64_t*)(p + mmb::memvid::hv_format)    = (int64_t)mmb::video_format::rgb24;
-        *(int64_t*)(p + mmb::memvid::hv_fps)       = 30;
-        *(int64_t*)(p + mmb::memvid::hv_bufs)      = 2;
-        *(int64_t*)(p + mmb::memvid::hv_blocksz)   = mmb::memvid::fv_last + (192 * 64);
+        mmb::memmap raw;
+        REQUIRE(raw.open("/memvid_badhdr", 0, false, false));
+        *(int64_t*)(raw.data() + mmb::memvid::hv_size) = int64_t(1) << 40;
 
         mmb::memvid vid;
         REQUIRE_FALSE(vid.open_existing("/memvid_badhdr"));

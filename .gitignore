@@ -6,6 +6,7 @@ _*
 creds
 /old/
 /src.old/
+MB-*
 
 ## CMake
 /bin/

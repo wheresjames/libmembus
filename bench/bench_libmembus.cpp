@@ -255,6 +255,58 @@ namespace
         });
     }
 
+    // Publish variable-length records into a mempkt ring.  Unlike memvid/memaud,
+    // whose "publish" is a fill() (memset) + next(), mempkt::write() performs a
+    // real memcpy of the payload into the arena — so this MiB/s figure includes a
+    // genuine copy and is not directly comparable to the fixed-slot rings.
+    result bench_mempkt_write(int duration_ms, int record_bytes)
+    {
+        mmb::mempkt pk;
+        int64_t maxrec  = record_bytes;
+        int64_t arenasz = (int64_t)record_bytes * 64;   // headroom so writes never self-stall
+        if (!pk.open(unique_name("mempkt"), true, 32, arenasz, maxrec))
+            throw std::runtime_error("mempkt open failed");
+
+        std::string payload(record_bytes, 'p');
+        std::string label = std::to_string(record_bytes) + " B/record (incl. copy)";
+        return run_for("mempkt write", "mempkt", label, duration_ms, [&]() -> uint64_t {
+            pk.write(payload, mmb::pkt_kind::data);
+            return (uint64_t)record_bytes;
+        });
+    }
+
+    // Consume records from a mempkt ring.  This is the only ring whose read path
+    // copies the payload out of shared memory and re-validates it against the
+    // write cursor (torn-read safety), so it is the one read-side cost worth
+    // measuring on its own.
+    result bench_mempkt_read(int duration_ms, int record_bytes)
+    {
+        std::string name = unique_name("mempkt_read");
+        mmb::mempkt_writer w;
+        int64_t maxrec  = record_bytes;
+        int64_t arenasz = (int64_t)record_bytes * 64;
+        if (!w.open(name, 32, arenasz, maxrec))
+            throw std::runtime_error("mempkt_read writer open failed");
+
+        mmb::mempkt_reader r;
+        if (!r.open(name))
+            throw std::runtime_error("mempkt_read reader open failed");
+
+        std::string payload(record_bytes, 'p');
+        std::string out, meta;
+        mmb::mempkt::recinfo info;
+        std::string label = std::to_string(record_bytes) + " B/record (copy-out)";
+        return run_for("mempkt read", "mempkt", label, duration_ms, [&]() -> uint64_t {
+            // Publish one, then copy it back out so the measured op is a full
+            // getRecord() (seqlock + arena copy + write-cursor re-check).
+            w.write(payload, mmb::pkt_kind::data);
+            bool overrun = false;
+            if (!r.readNext(out, meta, info, &overrun) || overrun)
+                return 0;
+            return (uint64_t)out.size();
+        });
+    }
+
     // ── Latency benchmarks ────────────────────────────────────────────────────
 
     // Measure the time from memvid::next() in a writer thread to mmb::select()
@@ -491,6 +543,9 @@ int main(int argc, char **argv)
         results.push_back(bench_memvid(opt.duration_ms, 640, 480));
         results.push_back(bench_memvid(opt.duration_ms, 1920, 1080));
         results.push_back(bench_memaud(opt.duration_ms));
+        results.push_back(bench_mempkt_write(opt.duration_ms, 1024));    // RTP-ish packet
+        results.push_back(bench_mempkt_write(opt.duration_ms, 32768));   // JPEG-ish frame
+        results.push_back(bench_mempkt_read(opt.duration_ms, 32768));    // copy-out cost
 
         // Latency benchmarks
         latency.push_back(bench_memmsg_roundtrip(opt.duration_ms));

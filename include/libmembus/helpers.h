@@ -514,4 +514,155 @@ private:
     int64_t m_lastPts = 0;
 };
 
+
+/** Convenience wrapper: creates a variable-length record ring and publishes records.
+ *
+ *  Calls open() with bCreate=true; any existing share with the same name is
+ *  removed and recreated.
+ */
+class mempkt_writer
+{
+public:
+
+    /** Create a record ring.
+     *  @param name     Share name (POSIX: must start with '/').
+     *  @param bufs     Number of descriptor slots.
+     *  @param arenasz  Payload arena size in bytes (size with headroom; see MB-MEMPKT.md §6.1).
+     *  @param maxrec   Largest single record (payload + metadata) accepted.
+     *  @param align    Record alignment (power of two, >= 8); 0 = default 64.
+     *  @param fourcc   Fourcc identity (0 = none).
+     *  @param guid     Optional 16-byte GUID identity.
+     *  @param meta     Optional main user buffer bytes.
+     *  @param metasz   Size of @p meta in bytes.
+     *  @returns true on success.
+     */
+    bool open(const std::string &name, int64_t bufs, int64_t arenasz, int64_t maxrec,
+              int64_t align = 0, uint32_t fourcc = 0, const uint8_t *guid = nullptr,
+              const void *meta = nullptr, int64_t metasz = 0)
+    {
+        mempkt::remove(name);
+        return m_pkt.open(name, true, bufs, arenasz, maxrec, align, fourcc, guid, meta, metasz);
+    }
+
+    /** Publish a record.  @returns the new descriptor write-pointer slot, or -1. */
+    int64_t write(const void *payload, int64_t len,
+                  pkt_kind kind = pkt_kind::data, int64_t track = 0, int64_t pts = 0,
+                  const void *meta = nullptr, int64_t metalen = 0)
+    { return m_pkt.write(payload, len, kind, track, pts, meta, metalen); }
+
+    /** Publish a std::string payload. */
+    int64_t write(const std::string &payload,
+                  pkt_kind kind = pkt_kind::data, int64_t track = 0, int64_t pts = 0)
+    { return m_pkt.write(payload, kind, track, pts); }
+
+    /// Close the ring and release all resources.
+    void close() { m_pkt.close(); }
+
+    /** Return the session ID written when the ring was created. */
+    int64_t getSessionId() { return m_pkt.getSessionId(); }
+
+    /// Return a reference to the underlying mempkt object.
+    mempkt &raw() { return m_pkt; }
+
+private:
+    mempkt m_pkt;
+};
+
+
+/** Convenience wrapper: attaches to an existing record ring and tracks the read
+ *  position with overrun detection.
+ *
+ *  Calls open_existing(); the segment is mapped read-only.
+ */
+class mempkt_reader
+{
+public:
+
+    /** Attach to an existing record ring and resync to the write position. */
+    bool open(const std::string &name)
+    {
+        if (!m_pkt.open_existing(name))
+            return false;
+        resync();
+        return true;
+    }
+
+    /** Poll until a new record is available or @p wait_ms elapses. */
+    bool wait(uint64_t wait_ms) { return m_pkt.waitForFrame(wait_ms, m_lastSeq); }
+
+    /** Copy the next available record out and advance the read position.
+     *
+     *  On overrun (the writer lapped this reader, or the record was overwritten
+     *  mid-copy) @p pOverrun is set true, the read position is resynced, and
+     *  false is returned — @p payload / @p meta must not be used.
+     *
+     *  @param payload   Receives the payload bytes on success.
+     *  @param meta      Receives the per-record metadata bytes on success.
+     *  @param info      Receives the record metadata (seq, pts, kind, …).
+     *  @param pOverrun  If non-null, set true on overrun.
+     *  @returns true on a clean read; false on overrun/timeout/no-data.
+     */
+    bool readNext(std::string &payload, std::string &meta, mempkt::recinfo &info,
+                  bool *pOverrun = nullptr)
+    {
+        if (pOverrun) *pOverrun = false;
+
+        int64_t bufs = m_pkt.getBufs();
+        if (bufs <= 0)
+            return false;
+
+        int64_t seq = m_pkt.getSeq();
+        if (seq - m_lastSeq >= bufs)
+        {
+            resync();
+            if (pOverrun) *pOverrun = true;
+            set_last_error(errc::overrun);
+            return false;
+        }
+
+        if (!m_pkt.getRecord(m_pos, payload, meta, info))
+        {
+            // Descriptor in flight or bytes lapped mid-copy — treat as overrun.
+            resync();
+            if (pOverrun) *pOverrun = true;
+            set_last_error(errc::overrun);
+            return false;
+        }
+
+        m_lastSeq = info.seq;
+        m_lastPts = info.pts;
+        m_pos = (m_pos + 1) % bufs;
+        set_last_error(errc::ok);
+        return true;
+    }
+
+    /** Presentation timestamp of the last record returned by readNext(). */
+    int64_t lastPts() const { return m_lastPts; }
+
+    /** Resync the read position to the current write position. */
+    void resync()
+    {
+        m_lastSeq = m_pkt.getSeq();
+        m_pos = m_pkt.getPtr(0);
+    }
+
+    /// Close the ring and release all resources.
+    void close() { m_pkt.close(); }
+
+    /// Return a reference to the underlying mempkt object.
+    mempkt &raw() { return m_pkt; }
+
+private:
+    mempkt m_pkt;
+
+    /// Sequence number of the last record successfully delivered to the caller.
+    int64_t m_lastSeq = 0;
+
+    /// Next slot index to read.
+    int64_t m_pos = 0;
+
+    /// Presentation timestamp of the last delivered record.
+    int64_t m_lastPts = 0;
+};
+
 }; // end namespace

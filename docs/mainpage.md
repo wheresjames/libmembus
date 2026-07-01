@@ -2,8 +2,9 @@
 
 **libmembus** is a C++20 shared-memory data bus for inter-process communication.
 It provides raw memory maps, message and command channels, fixed-schema key-value
-state, and ring buffers for video and audio — all backed by named shared memory
-with no broker process required.
+state, ring buffers for raw video and audio, and a variable-length record ring for
+compressed / packetized streams — all backed by named shared memory with no broker
+process required.
 
 Full usage documentation, design notes, and examples are in the
 [README](https://github.com/wheresjames/libmembus#readme).
@@ -18,6 +19,7 @@ Full usage documentation, design notes, and examples are in the
 | mmb::memmsg  | Single-producer, multi-consumer message queue |
 | mmb::memvid  | Lock-free video frame ring buffer |
 | mmb::memaud  | Lock-free PCM audio ring buffer |
+| mmb::mempkt  | Lock-free variable-length record ring for compressed / packetized streams |
 | mmb::memcmd  | Multi-producer, multi-consumer command channel |
 | mmb::memkv   | Fixed-schema key-value store with seqlock reads |
 
@@ -29,6 +31,7 @@ Full usage documentation, design notes, and examples are in the
 | mmb::memcmd_sender / mmb::memcmd_receiver | Send/receive commands |
 | mmb::memvid_writer / mmb::memvid_reader   | Publish/consume video frames |
 | mmb::memaud_writer / mmb::memaud_reader   | Publish/consume audio buffers |
+| mmb::mempkt_writer / mmb::mempkt_reader   | Publish/consume variable-length records |
 
 ## Error handling
 

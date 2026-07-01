@@ -30,6 +30,7 @@ COLORS = {
     "memkv":   "#fb7185",
     "memvid":  "#fb923c",
     "memaud":  "#22d3ee",
+    "mempkt":  "#818cf8",
     "select":  "#facc15",
     "latency": "#f472b6",
 }

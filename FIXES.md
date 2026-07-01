@@ -129,6 +129,53 @@ return result; // best-effort after 100 retries
 
 ---
 
+### B7 — Unaligned `int64_t` frame headers in `memvid` and `memaud` ring buffers
+**Files:** `source/cpp/memvid.cpp`, `source/cpp/memaud.cpp`
+**Status:** Fixed as part of the MB-MEMPKT.md header rework — `blocksz` is now
+rounded up to `hv_align` (default 64) in `computeLayout`, so slot strides and
+their `int64_t` frame headers are always aligned.  Covered by the "Payload
+alignment" case in `test/cpp/test_custom.cpp` (641×481 GRAY8).
+
+**Problem:** This is the same defect class as B2, missed in the two fixed-slot
+media classes.  `calcLayout` computes the ring stride as
+`blocksz = fv_last + sw*h` (memvid) / `fv_last + samplesPerFrame*ch*bps`
+(memaud) with **no alignment rounding**.  When the payload size is not a
+multiple of 8, `blocksz` is unaligned and every slot after the first drifts off
+an 8-byte boundary.
+
+Because each slot's `int64_t` frame-header fields (`fv_seq`, `fv_vpts`,
+`fv_apts`) are accessed via `std::atomic_ref<int64_t>` in `next()` and
+`getFrameSeq()`, an unaligned slot places those atomics on an unaligned address.
+`std::atomic_ref` on a misaligned object is undefined behaviour: benign on x86
+(misaligned atomics happen to work), but it can fault or tear on
+strict-alignment architectures (SPARC, some MIPS/ARM configurations).  Frame
+payloads are likewise left as weak as byte-aligned, which also breaks SIMD/DMA
+codecs that require aligned input buffers.
+
+Example — memvid `GRAY8`, 641×481:
+```
+sw = 641,  payload = 641*481 = 308321   (odd)
+blocksz    = fv_last(32) + 308321 = 308353   (odd)
+slot 1 start = hv_last(88) + 308353 = 308441   ≡ 1 (mod 8)
+→ fv_seq at 308441 + fv_seq_off sits on an odd address
+```
+
+**Recommended fix:** Round `blocksz` up to an 8-byte (or larger) multiple in
+`calcLayout`, mirroring B2's `frameStride()`:
+```cpp
+blocksz = (fv_last + payload + 7) & ~int64_t(7);
+```
+Update `validateMappedLayout` to expect the rounded `blocksz`, and grow `total`
+to account for the per-slot padding.  A configurable alignment (≥ 8, up to page
+size for DMA paths) is proposed for the broader custom-format work; see
+`MB-MEMPKT.md` §5.2 (`hv_align`), which subsumes this fix.
+
+**Wire-format note:** Like B2, this changes the shared-memory slot layout.
+Existing live shares created by the old code must be closed and reopened after
+upgrading.
+
+---
+
 ## Security Issues
 
 ### S1 — TOCTOU: shared-memory header fields trusted post-validation in `memvid` and `memaud`

@@ -20,6 +20,7 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
   - [memmsg — message queue](#memmsg--message-queue)
   - [memvid — video ring buffer](#memvid--video-ring-buffer)
   - [memaud — audio ring buffer](#memaud--audio-ring-buffer)
+  - [mempkt — variable-length record ring](#mempkt--variable-length-record-ring)
   - [memcmd — command channel](#memcmd--command-channel)
   - [memkv — key-value store](#memkv--key-value-store)
   - [select — wait on multiple sources](#select--wait-on-multiple-sources)
@@ -40,17 +41,23 @@ A C++20 shared memory data bus for inter-process communication. Provides raw mem
 - **`memmsg`** — single-producer, multi-consumer message queue with overrun detection
 - **`memvid`** — lock-free multi-buffer video ring buffer with explicit packed pixel formats and overrun detection
 - **`memaud`** — lock-free multi-buffer audio ring buffer with explicit sample formats and overrun detection
+- **`mempkt`** — lock-free variable-length record ring for compressed / packetized streams (MJPEG, H.264, RTSP, muxed A/V); descriptor ring + packed byte arena with torn-read detection
 - **`memcmd`** — multi-producer, multi-consumer broadcast command channel with overrun detection
 - **`memkv`** — fixed-schema key-value store; lock-free seqlock reads, atomic batch writes, change notifications
 - Presentation timestamps (`vpts`, `apts`) stored per slot in `memvid`; single `pts` field in `memaud`
+- Custom / opaque pixel formats (`video_format::userType`) with caller-supplied geometry
+- Format identity carried in every structured share: 32-bit `fourcc` and 128-bit `guid`
+- Optional side-band metadata: one write-once main user buffer per share (SDP/SIP/JSON), plus a fixed per-frame user buffer
+- Configurable payload alignment (default 64) so frame/record buffers satisfy SIMD/DMA codec requirements
 - `mmb::select()` — poll any combination of sources (rings, queues, key-value) with a single blocking call
 - CMake `find_package(libmembus)` support via installed config, version, and targets files
 - Convenience wrappers for common reader/writer roles
 - Single public include, compiled library implementation
 - C++20, bool-returning open/write APIs
 - Defensive validation of shared-memory headers before attaching to existing structured shares
-- TOCTOU-resistant buffer accessors: `getBuf()` bounds-checks all header-driven offsets at call time
-- Reader handles for `memvid` and `memaud` map shared memory read-only (least-privilege)
+- A shared header prefix (`magic`/`type`/`version`) makes cross-type opens (e.g. attaching to a `memvid` share as `memaud`) fail deterministically
+- TOCTOU-resistant buffer accessors: `getBuf()` / `getRecord()` bounds-check all header-driven offsets at call time
+- Reader handles for `memvid`, `memaud`, and `mempkt` map shared memory read-only (least-privilege)
 
 ---
 
@@ -501,7 +508,7 @@ int64_t apts = consumer.getApts(rPos);
 | `getFps()` | Frames per second |
 | `getBufs()` | Number of slots in the ring |
 
-Supported video formats are stored in the shared-memory header as an `int64_t` at `memvid::hv_format` byte offset `56`:
+Supported video formats are stored in the shared-memory header as an `int64_t` at `memvid::hv_format`:
 
 | Format name | Header value | Bytes per pixel |
 |---|---:|---:|
@@ -512,8 +519,39 @@ Supported video formats are stored in the shared-memory header as an `int64_t` a
 | `bgra32` | `5` | 4 |
 | `yuyv422` | `6` | 2 |
 | `uyvy422` | `7` | 2 |
+| `userType` | `0x1000` | caller-supplied |
 
 The YUV 4:2:2 formats are packed and require an even frame width.
+
+**Custom / opaque formats:** pass `video_format::userType` with an explicit
+`scanwidth` (bytes per row).  The library treats the payload as opaque and
+carries geometry from the caller; the concrete format is identified by the
+`fourcc` / `guid` fields (below).  `video_format_bytes_per_pixel(userType)`
+returns `0`.
+
+**Identity and side-band metadata (shared by `memvid`, `memaud`, `mempkt`):** the
+extended `open()` accepts optional trailing arguments — `align` (payload
+alignment, default 64), `frameextra` (fixed per-frame user-buffer size), `fourcc`,
+`guid` (16 bytes), and `meta` / `metasz` (a write-once main user buffer for
+SDP/SIP/JSON session config).  The existing positional parameters are unchanged,
+so current callers compile without modification.
+
+| Method | Description |
+|--------|-------------|
+| `getFourcc()` / `getGuid(out)` | Format identity (fourcc; 16-byte GUID) |
+| `getMeta()` / `getMetaSize()` | Main user metadata buffer |
+| `getAlign()` | Payload alignment in bytes |
+| `getFrameExtra()` | Per-frame user-buffer stride |
+| `setUserData(idx, p, n)` / `getUserData(idx)` / `getUserLen(idx)` | Per-frame user buffer |
+
+**Payload alignment:** each frame's pixel data starts on an `align`-byte boundary
+(default 64), and the per-slot `int64_t` header fields are always naturally
+aligned regardless of frame geometry.
+
+**Wire-format note:** the header layout is version `2` and begins with a shared
+`magic`/`type`/`version` prefix common to `memvid`, `memaud`, and `mempkt`.  This
+is a breaking change from earlier layouts — close and recreate any live shares
+after upgrading; old shares fail validation cleanly.
 
 ---
 
@@ -551,7 +589,9 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 
 **Buffer size note:** the samples-per-frame count is computed as `⌈sampleRate / fps⌉` (ceiling division).  This ensures each buffer holds at least one full frame's worth of audio even when the rates do not divide evenly, preventing long-running clock drift.  `getBufSize()` returns the actual byte count per buffer.
 
-**Wire-format note:** the `memaud` frame header grew from 16 bytes to 24 bytes to accommodate the `fv_pts` timestamp field.  Shares created by older versions of the library cannot be opened by this version (layout validation will reject them).
+`memaud` shares the same optional identity / side-band-metadata parameters and accessors as `memvid` (`fourcc`, `guid`, `align`, `frameextra`, `meta`; `getFourcc`, `getGuid`, `getMeta`, `setUserData`, …).
+
+**Wire-format note:** the header layout is version `2` with the shared `magic`/`type`/`version` prefix common to `memvid`, `memaud`, and `mempkt`.  This is a breaking change from earlier layouts; close and recreate any live shares after upgrading.
 
 **Metadata:**
 
@@ -578,7 +618,7 @@ Each buffer slot carries a single 64-bit `pts` field.  Write it after filling sa
 The pointer/sequence/session helpers (`setPtr`, `getPtr`, `next`, `getPtrErr`, `getSeq`, `getFrameSeq`, `getSessionId`) work identically to the `memvid` equivalents.
 `waitForFrame(wait_ms, lastSeq)` is also available and follows the same polling semantics.
 
-Supported audio formats are stored in the shared-memory header as an `int64_t` at `memaud::hv_format` byte offset `40`:
+Supported audio formats are stored in the shared-memory header as an `int64_t` at `memaud::hv_format`:
 
 | Format name | Header value | Bytes per sample |
 |---|---:|---:|
@@ -588,6 +628,67 @@ Supported audio formats are stored in the shared-memory header as an `int64_t` a
 | `s32le` | `4` | 4 |
 | `f32le` | `5` | 4 |
 | `f64le` | `6` | 8 |
+
+---
+
+### mempkt — variable-length record ring
+
+Lock-free ring for **variable-length, opaque** records — intended for compressed
+or packetized streams (MJPEG, H.264/HEVC access units, RTSP payloads, muxed A/V,
+or arbitrary application data) where `memvid`/`memaud`'s fixed-size slots do not
+fit.  Single-writer, multiple-reader, like the other rings.
+
+Internally it is a **descriptor ring + packed byte arena**: a fixed array of
+descriptors gives O(1) addressing and overrun detection, while the variable
+payloads live in a separate arena.  Because the arena is overwritten in place,
+readers copy a record out and then re-check a monotonic write-cursor to confirm
+the bytes were not lapped mid-copy (all handled inside `getRecord()`).
+
+```cpp
+mmb::mempkt_writer w;
+// 16 descriptor slots, 1 MiB arena, records up to 256 KiB, fourcc 'MJPG'
+w.open("/my_stream", /*bufs=*/16, /*arenasz=*/1<<20, /*maxrec=*/256<<10,
+       /*align=*/64, /*fourcc=*/0x47504a4du);
+
+// Publish a compressed frame (kind, track, pts, optional per-record metadata)
+w.write(jpeg.data(), (int64_t)jpeg.size(), mmb::pkt_kind::video, /*track=*/0, pts_us);
+
+mmb::mempkt_reader r;
+r.open("/my_stream");
+
+std::string payload, meta;
+mmb::mempkt::recinfo info;
+bool overrun = false;
+if (r.wait(100) && r.readNext(payload, meta, info, &overrun) && !overrun) {
+    // payload — the record bytes; info.pts / info.kind / info.track — descriptor fields
+}
+```
+
+**Sizing (`arenasz` vs `maxrec`):** `arenasz` must be at least `maxrec`, but sizing
+it *to* that floor livelocks readers — a full-size record is overwritten almost
+immediately.  Give the arena headroom (several × `maxrec`, or `bufs × typical
+record`) so readers have time to copy records out.
+
+**Capacities and identity:**
+
+| Method | Description |
+|--------|-------------|
+| `getBufs()` | Number of descriptor slots |
+| `getArenaSize()` | Payload arena size in bytes |
+| `getMaxRec()` | Largest single record (payload + metadata) accepted |
+| `getWcursor()` | Live monotonic arena write-cursor |
+| `getFourcc()` / `getGuid(out)` | Format identity |
+| `getMeta()` / `getMetaSize()` | Main user metadata buffer (write-once) |
+
+The pointer/sequence/session helpers (`getPtr`, `getSeq`, `getFrameSeq`,
+`getSessionId`, `waitForFrame`) mirror the `memvid` equivalents; the descriptor
+ring uses the same lag-based overrun check.  `write()` returns `-1` and sets
+`errc::message_too_large` when `payload + metadata` exceeds `maxrec`.
+
+Per-record fields let a single ring carry muxed content: `kind`
+(`pkt_kind::video` / `audio` / `data`), `track` (stream id; low 32 bits may carry
+a fourcc), `pts`, and an optional per-record metadata blob returned alongside the
+payload.
 
 ---
 
@@ -790,6 +891,8 @@ The core classes remain available directly, but `libmembus.h` also includes smal
 | `memvid_reader` | `memvid` | Opens an existing video ring; `readNext()` caches timestamps in `lastVpts()`/`lastApts()` |
 | `memaud_writer` | `memaud` | Creates an audio ring; publishes buffers with optional `setPts` |
 | `memaud_reader` | `memaud` | Opens an existing audio ring; `readNext()` caches the timestamp in `lastPts()` |
+| `mempkt_writer` | `mempkt` | Creates a record ring; publishes variable-length records with `write()` |
+| `mempkt_reader` | `mempkt` | Opens an existing record ring; `readNext()` copies out the next record with overrun detection |
 
 Example:
 
@@ -823,18 +926,26 @@ mutually distrusting processes.
 
 ### Header validation
 
-All structured shares (`memmsg`, `memcmd`, `memvid`, `memaud`, `memkv`) validate
-their shared-memory headers before attaching:
+All structured shares (`memmsg`, `memcmd`, `memvid`, `memaud`, `mempkt`, `memkv`)
+validate their shared-memory headers before attaching:
 
 - Schema fields are checked against expected values; mismatched or undersized
   shares are rejected.
-- `memvid::open_existing` and `memaud::open_existing` run a full layout
-  consistency check and map the segment **read-only**.
-- `getBuf()` in `memvid` and `memaud` snapshots header fields locally and
-  bounds-checks the computed slot address against the mapped size on every call.
-  A peer that modifies `hv_bufs`, `hv_blocksz`, or related fields after the
-  initial validation causes `getBuf()` to throw rather than produce an
+- `memvid`, `memaud`, and `mempkt` share a header prefix carrying a `magic`
+  constant and a `type` discriminator, checked first — so attaching to a share of
+  the wrong class (e.g. opening a `memvid` share as `memaud`) fails deterministically
+  rather than by coincidence of the layout math.
+- `memvid::open_existing`, `memaud::open_existing`, and `mempkt::open_existing`
+  run a full layout consistency check and map the segment **read-only**.
+- `getBuf()` (`memvid`/`memaud`) and `getRecord()` (`mempkt`) snapshot header
+  fields locally and bounds-check every computed offset against the mapped size on
+  every call, using overflow-checked arithmetic.  A peer that modifies `hv_bufs`,
+  `hv_blocksz`, `hv_descstride`, or related fields after the initial validation
+  causes the accessor to fail (throw / return `false`) rather than produce an
   out-of-bounds pointer.
+- `mempkt` records are copied out of the arena and then re-validated against a
+  monotonic write-cursor, so a reader lapped mid-copy discards the record instead
+  of returning torn bytes.
 
 For `memmsg` and `memcmd`, the reader must acquire the shared interprocess mutex
 (stored inside the segment), which requires read-write mapping.  Those types
@@ -889,6 +1000,8 @@ The benchmark harness covers two categories:
 
 **Throughput** — single-process, in-memory loops that measure raw ops/sec and MiB/sec.  Useful for comparing per-operation cost across API families; results vary with CPU, kernel, compiler flags, and scheduler noise.
 
+> **Note on `mempkt`:** its "publish" figure includes a real payload `memcpy` into the arena, whereas the `memvid`/`memaud` "publish" figures are a `fill()` (`memset`) + `next()` with no copy — so the MiB/sec numbers are not directly comparable across those groups.  `mempkt read` measures the full consume path (`getRecord()`: seqlock + arena copy-out + write-cursor re-check), which is the one read-side cost the other rings avoid by handing back zero-copy views.
+
 **Latency** — two-thread measurements that capture end-to-end timing percentiles (p50/p95/p99):
 
 - `memmsg round-trip latency` — a ping-pong between two threads sharing a message queue.  Each sample is the time from `write()` to the echo reply being received.  Dominated by two condvar wakeup / mutex-acquisition cycles (one per direction) and approximates real cross-process latency.
@@ -912,29 +1025,32 @@ Latest generated summary:
 <!-- BEGIN BENCHMARK SUMMARY -->
 <!-- Generated by bench/plot_results.py. Do not edit by hand. -->
 
-Benchmark duration: `500 ms` per case
+Benchmark duration: `1000 ms` per case
 
-System: `Linux 6.18.5+kali-amd64 x86_64`
+System: `Linux 6.19.14+kali-amd64 x86_64`
 
 **Throughput** (higher is better):
 
 | Benchmark | Payload | Ops/sec | MiB/sec | ns/op |
 |---|---:|---:|---:|---:|
-| memmap read/write | 64 KiB | 429.98K | 53747.4 | 2325.7 |
-| memmsg single writer/reader | 64 B | 7.80M | 476.1 | 128.2 |
-| memcmd 4 writers/1 reader | 64 B | 7.39M | 451.2 | 135.3 |
-| memkv setValue | 64 B value | 10.40M | 635.0 | 96.1 |
-| memkv getValue | 64 B value | 33.97M | 2073.5 | 29.4 |
-| memvid publish | 640x480 | 45.63K | 40105.2 | 21915.0 |
-| memvid publish | 1920x1080 | 3.67K | 21787.6 | 272293.0 |
-| memaud publish | stereo S16LE 48k/100fps | 20.04M | 36701.2 | 49.9 |
+| memmap read/write | 64 KiB | 395.80K | 49474.5 | 2526.6 |
+| memmsg single writer/reader | 64 B | 7.94M | 484.3 | 126.0 |
+| memcmd 4 writers/1 reader | 64 B | 7.89M | 481.7 | 126.7 |
+| memkv setValue | 64 B value | 10.84M | 661.8 | 92.2 |
+| memkv getValue | 64 B value | 33.34M | 2034.7 | 30.0 |
+| memvid publish | 640x480 | 46.41K | 40791.4 | 21546.3 |
+| memvid publish | 1920x1080 | 4.12K | 24460.1 | 242542.0 |
+| memaud publish | stereo S16LE 48k/100fps | 18.45M | 33792.2 | 54.2 |
+| mempkt write | 1024 B/record (incl. copy) | 19.80M | 19339.1 | 50.5 |
+| mempkt write | 32768 B/record (incl. copy) | 962.56K | 30080.0 | 1038.9 |
+| mempkt read | 32768 B/record (copy-out) | 610.97K | 19092.8 | 1636.7 |
 
 **Latency** (lower is better):
 
 | Benchmark | Payload | Samples | p50 µs | p95 µs | p99 µs |
 |---|---:|---:|---:|---:|---:|
-| memmsg round-trip latency | 64 B | 115255 | 4 | 6 | 7 |
-| select() wakeup latency | 1 memvid source | 99 | 551 | 1138 | 1192 |
+| memmsg round-trip latency | 64 B | 252578 | 4 | 5 | 6 |
+| select() wakeup latency | 1 memvid source | 196 | 579 | 1117 | 1253 |
 <!-- END BENCHMARK SUMMARY -->
 
 Generated files:

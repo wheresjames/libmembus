@@ -7,14 +7,14 @@
 <rect x="390" y="58" width="16" height="16" rx="3" fill="#fb7185"/>
 <text x="412" y="71" font-family="Arial, sans-serif" font-size="13" fill="#cbd5e1">p99</text>
 <text x="308" y="150" text-anchor="end" font-family="Arial, sans-serif" font-size="13" fill="#cbd5e1">memmsg round-trip latency (64 B)</text>
-<rect x="320" y="110" width="2.43" height="28" rx="4" fill="#34d399"/>
-<text x="330.42808135877544" y="130" font-family="Arial, sans-serif" font-size="13" fill="#e2e8f0">4 µs (p50)</text>
-<rect x="320" y="144" width="4.24" height="28" rx="4" fill="#fb7185"/>
-<text x="332.2410736003355" y="164" font-family="Arial, sans-serif" font-size="13" fill="#e2e8f0">7 µs (p99)</text>
+<rect x="320" y="110" width="2.20" height="28" rx="4" fill="#34d399"/>
+<text x="330.19545320342485" y="130" font-family="Arial, sans-serif" font-size="13" fill="#e2e8f0">4 µs (p50)</text>
+<rect x="320" y="144" width="3.77" height="28" rx="4" fill="#fb7185"/>
+<text x="331.76852671981106" y="164" font-family="Arial, sans-serif" font-size="13" fill="#e2e8f0">6 µs (p99)</text>
 <text x="308" y="254" text-anchor="end" font-family="Arial, sans-serif" font-size="13" fill="#cbd5e1">select() wakeup latency (1 memvid source)</text>
-<rect x="320" y="214" width="342.11" height="28" rx="4" fill="#34d399"/>
-<text x="670.1062361081988" y="234" font-family="Arial, sans-serif" font-size="13" fill="#e2e8f0">551 µs (p50)</text>
+<rect x="320" y="214" width="342.12" height="28" rx="4" fill="#34d399"/>
+<text x="670.1222320637733" y="234" font-family="Arial, sans-serif" font-size="13" fill="#e2e8f0">579 µs (p50)</text>
 <rect x="320" y="248" width="740.00" height="28" rx="4" fill="#fb7185"/>
-<text x="1052.0" y="268" text-anchor="end" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#0f172a">1192 µs (p99)</text>
+<text x="1052.0" y="268" text-anchor="end" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#0f172a">1253 µs (p99)</text>
 <text x="320" y="540" font-family="Arial, sans-serif" font-size="12" fill="#94a3b8">Lower is better. Generated from bench-libmembus JSON output.</text>
 </svg>
