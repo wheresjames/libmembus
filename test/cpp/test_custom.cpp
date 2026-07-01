@@ -116,6 +116,37 @@ TEST_CASE("CustomTypes", "[custom]")
         REQUIRE(std::string(aud.getUserData(1), aud.getUserLen(1)) == t);
     }
 
+    SECTION("memaud userType uses caller-supplied payload size")
+    {
+        mmb::memaud aud;
+        REQUIRE_FALSE(aud.open("/ma_opaque_bad", true, 2, mmb::audio_format::userType,
+                               48000, 100, 4));
+        REQUIRE(aud.open("/ma_opaque", true, 2, mmb::audio_format::userType,
+                         48000, 100, 4,
+                         /*align=*/0, /*frameextra=*/0, /*fourcc=*/0x5050514fu,
+                         /*guid=*/nullptr, /*meta=*/nullptr, /*metasz=*/0,
+                         /*payloadSize=*/1536));
+
+        REQUIRE(aud.getFormat() == mmb::audio_format::userType);
+        REQUIRE(std::string(aud.getFormatName()) == "USERTYPE");
+        REQUIRE(aud.getBytesPerSample() == 0);
+        REQUIRE(aud.getBufSize() == 1536);
+        REQUIRE(aud.getFourcc() == 0x5050514fu);
+        auto v = aud.getBuf(0);
+        REQUIRE(v.m_format == mmb::audio_format::userType);
+        REQUIRE(v.m_ch == 2);
+        REQUIRE(v.m_size == 1536);
+        REQUIRE(aud.fill(0, 0x5A));
+        REQUIRE((unsigned char)v.m_ptr[0] == 0x5A);
+        REQUIRE((unsigned char)v.m_ptr[v.m_size - 1] == 0x5A);
+
+        mmb::memaud rd;
+        REQUIRE(rd.open_existing("/ma_opaque"));
+        REQUIRE(rd.getFormat() == mmb::audio_format::userType);
+        REQUIRE(rd.getBufSize() == 1536);
+        REQUIRE(rd.getBuf(0).m_size == 1536);
+    }
+
     SECTION("Cross-type guard: a share of one class cannot be opened as another")
     {
         mmb::memvid vid;

@@ -16,7 +16,9 @@ enum class audio_format : int64_t
     s24le,     ///< Signed 24-bit little-endian; 3 bytes per sample.
     s32le,     ///< Signed 32-bit little-endian; 4 bytes per sample.
     f32le,     ///< 32-bit IEEE-754 float little-endian; 4 bytes per sample.
-    f64le      ///< 64-bit IEEE-754 double little-endian; 8 bytes per sample.
+    f64le,     ///< 64-bit IEEE-754 double little-endian; 8 bytes per sample.
+
+    userType = 0x1000 ///< Opaque / custom fixed-size format; payload size is caller-supplied.
 };
 
 /** Return the name string for an audio_format enum value (e.g. "S16LE"). */
@@ -25,13 +27,14 @@ const char *audio_format_name(audio_format fmt);
 /** Return the number of bytes per sample for one channel of an audio_format. */
 int64_t audio_format_bytes_per_sample(audio_format fmt);
 
-/** Lock-free multi-buffer PCM audio ring buffer in shared memory.
+/** Lock-free multi-buffer fixed-size audio ring buffer in shared memory.
  *
  *  Follows the same design as memvid (single-writer, multiple-reader): the
  *  writer creates the share and calls next() after filling each buffer slot;
  *  readers attach with open_existing() and consume slots independently.
  *
- *  Buffer size: each slot holds ceil(sampleRate / fps) samples per channel.
+ *  Buffer size: known PCM formats derive from ceil(sampleRate / fps); userType
+ *  uses the caller-supplied payload size.
  */
 class memaud
 {
@@ -42,7 +45,7 @@ public:
     /// Shared-memory magic constant written to hv_magic ('MBUS').
     static const int64_t k_magic   = 0x5355424dLL;
     /// Current header layout version written to hv_version.
-    static const int64_t k_version = 2;
+    static const int64_t k_version = 3;
     /// Default payload alignment when the caller passes 0.
     static const int64_t k_defAlign = 64;
 
@@ -64,7 +67,7 @@ public:
     {
     public:
 
-        /** Construct a view over a raw PCM buffer. */
+        /** Construct a view over a raw audio payload buffer. */
         audview(char* p, int64_t sz, int64_t ch, audio_format fmt)
             : m_ptr(p), m_size(sz), m_ch(ch), m_format(fmt)
         {
@@ -95,7 +98,7 @@ public:
         /// Pointer to the first sample byte of the buffer.
         char        *m_ptr;
 
-        /// Total PCM data size in bytes.
+        /// Total payload size in bytes.
         int64_t     m_size;
 
         /// Number of interleaved channels.
@@ -139,14 +142,15 @@ public:
         hv_blocksz      = 25 * sizeof(int64_t),  ///< int64_t: size of one buffer slot in bytes (aligned).
         hv_frameextra   = 26 * sizeof(int64_t),  ///< int64_t: per-frame user buffer stride in bytes (0 = none).
         hv_useroffset   = 27 * sizeof(int64_t),  ///< int64_t: computed base offset of per-frame user region.
-        hv_dataoffset   = 28 * sizeof(int64_t),  ///< int64_t: computed base offset of PCM data region.
-        hv_last         = 29 * sizeof(int64_t)   ///< Total fixed header size; MAINUSERBUF begins here.
+        hv_dataoffset   = 28 * sizeof(int64_t),  ///< int64_t: computed base offset of payload data region.
+        hv_payloadsize  = 29 * sizeof(int64_t),  ///< int64_t: per-slot payload bytes.
+        hv_last         = 30 * sizeof(int64_t)   ///< Total fixed header size; MAINUSERBUF begins here.
     };
 
     /** Byte offsets of fields within a single buffer slot, relative to the slot start.
      *
      *  Layout: [fv_size][fv_pts][fv_userlen][fv_seq] then padding up to hv_align,
-     *  then PCM sample data.
+     *  then payload data.
      */
     enum FrameHeaderVal
     {
@@ -182,13 +186,16 @@ public:
      *  @param guid        Optional 16-byte GUID identity (null = none).
      *  @param meta        Optional main user buffer bytes copied in at create.
      *  @param metasz      Size of @p meta in bytes (0 = none).
+     *  @param payloadSize Per-slot payload bytes. Required (> 0) for audio_format::userType;
+     *                     pass 0 to derive from known PCM formats.
      *  @returns true on success; false on failure (see last_error()).
      */
     bool open(const std::string &sName, bool bCreate, int64_t ch, audio_format fmt,
               int64_t sampleRate, int64_t fps, int64_t bufs,
               int64_t align = 0, int64_t frameextra = 0,
               uint32_t fourcc = 0, const uint8_t *guid = nullptr,
-              const void *meta = nullptr, int64_t metasz = 0);
+              const void *meta = nullptr, int64_t metasz = 0,
+              int64_t payloadSize = 0);
 
     /** Attach to an existing audio ring buffer without knowing its parameters. */
     bool open_existing(const std::string &sName);
@@ -247,7 +254,7 @@ public:
     /** Return the nominal buffer rate (buffers per second) stored in the header. */
     int64_t getFps();
 
-    /** Return the PCM data size of a single buffer slot in bytes. */
+    /** Return the payload size of a single buffer slot in bytes. */
     int64_t getBufSize();
 
     /** Return the random session ID written when the share was created.  0 if not open. */

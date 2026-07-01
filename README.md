@@ -557,7 +557,7 @@ after upgrading; old shares fail validation cleanly.
 
 ### memaud — audio ring buffer
 
-Same lock-free ring-buffer model as `memvid` but for PCM audio buffers.
+Same lock-free ring-buffer model as `memvid` but for fixed-size audio buffers.
 
 ```cpp
 mmb::memaud producer, consumer;
@@ -587,11 +587,11 @@ mmb::memaud::audview buf = consumer.getBuf(consumer.getPtr(-1));
 
 `getBuf()` snapshots all header fields at call time and bounds-checks the computed slot offset against the mapped size before returning.
 
-**Buffer size note:** the samples-per-frame count is computed as `⌈sampleRate / fps⌉` (ceiling division).  This ensures each buffer holds at least one full frame's worth of audio even when the rates do not divide evenly, preventing long-running clock drift.  `getBufSize()` returns the actual byte count per buffer.
+**Buffer size note:** for known PCM formats, the samples-per-frame count is computed as `ceil(sampleRate / fps)`.  This ensures each buffer holds at least one full frame's worth of audio even when the rates do not divide evenly, preventing long-running clock drift.  For `audio_format::userType`, pass the fixed per-slot payload byte count as the final `open()` argument.  `getBufSize()` returns the actual byte count per buffer.
 
 `memaud` shares the same optional identity / side-band-metadata parameters and accessors as `memvid` (`fourcc`, `guid`, `align`, `frameextra`, `meta`; `getFourcc`, `getGuid`, `getMeta`, `setUserData`, …).
 
-**Wire-format note:** the header layout is version `2` with the shared `magic`/`type`/`version` prefix common to `memvid`, `memaud`, and `mempkt`.  This is a breaking change from earlier layouts; close and recreate any live shares after upgrading.
+**Wire-format note:** the `memaud` header layout is version `3` with the shared `magic`/`type`/`version` prefix common to `memvid`, `memaud`, and `mempkt`.  This is a breaking change from earlier `memaud` layouts; close and recreate any live shares after upgrading.
 
 **Metadata:**
 
@@ -628,6 +628,12 @@ Supported audio formats are stored in the shared-memory header as an `int64_t` a
 | `s32le` | `4` | 4 |
 | `f32le` | `5` | 4 |
 | `f64le` | `6` | 8 |
+| `userType` | `0x1000` | caller-supplied |
+
+**Custom / opaque formats:** pass `audio_format::userType` and a positive
+per-slot payload byte count as the final `memaud::open()` argument.  The
+`fourcc` / `guid` fields can carry application-specific format identity.
+`audio_format_bytes_per_sample(userType)` returns `0`.
 
 ---
 

@@ -18,6 +18,7 @@ const char *audio_format_name(audio_format fmt)
     case audio_format::s32le: return "S32LE";
     case audio_format::f32le: return "F32LE";
     case audio_format::f64le: return "F64LE";
+    case audio_format::userType: return "USERTYPE";
     }
     return "unknown";
 }
@@ -32,6 +33,7 @@ int64_t audio_format_bytes_per_sample(audio_format fmt)
     case audio_format::s32le: return 4;
     case audio_format::f32le: return 4;
     case audio_format::f64le: return 8;
+    case audio_format::userType: return 0;
     }
     return 0;
 }
@@ -98,10 +100,19 @@ namespace
         return true;
     }
 
-    // Compute per-slot PCM payload bytes: ceil(sampleRate/fps) * ch * bytesPerSample.
+    // Compute per-slot payload bytes. Opaque userType buffers have no sample
+    // width, so the caller supplies the fixed slot payload size explicitly.
     bool calcPayload(int64_t ch, audio_format fmt, int64_t sampleRate, int64_t fps,
-                     int64_t &payload)
+                     int64_t payloadSize, int64_t &payload)
     {
+        if (fmt == audio_format::userType)
+        {
+            if (ch <= 0 || sampleRate <= 0 || fps <= 0 || payloadSize <= 0)
+                return false;
+            payload = payloadSize;
+            return true;
+        }
+
         int64_t sampleBytes = audio_format_bytes_per_sample(fmt);
         if (ch <= 0 || sampleBytes <= 0 || sampleRate <= 0 || fps <= 0)
             return false;
@@ -136,11 +147,13 @@ namespace
         int64_t blocksz    = *(int64_t*)(p + memaud::hv_blocksz);
         int64_t useroffset = *(int64_t*)(p + memaud::hv_useroffset);
         int64_t dataoffset = *(int64_t*)(p + memaud::hv_dataoffset);
+        int64_t payloadsz  = *(int64_t*)(p + memaud::hv_payloadsize);
 
         int64_t payload = 0, cFvHdr = 0, cBlock = 0, cUser = 0, cData = 0, cTotal = 0;
-        return calcPayload(ch, fmt, sampleRate, fps, payload)
+        return calcPayload(ch, fmt, sampleRate, fps, payloadsz, payload)
             && computeLayout(payload, align, bufs, frameExtra, metasize,
                              cFvHdr, cBlock, cUser, cData, cTotal)
+            && payloadsz == payload
             && blocksz == cBlock
             && useroffset == cUser
             && dataoffset == cData
@@ -155,8 +168,9 @@ namespace
         audio_format fmt   = (audio_format)*(int64_t*)(p + memaud::hv_format);
         int64_t sampleRate = *(int64_t*)(p + memaud::hv_samplerate);
         int64_t fps        = *(int64_t*)(p + memaud::hv_fps);
+        int64_t payloadsz  = *(int64_t*)(p + memaud::hv_payloadsize);
         int64_t payload = 0;
-        return calcPayload(ch, fmt, sampleRate, fps, payload) ? payload : 0;
+        return calcPayload(ch, fmt, sampleRate, fps, payloadsz, payload) ? payload : 0;
     }
 }
 
@@ -600,11 +614,11 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, audio_form
                   int64_t sampleRate, int64_t fps, int64_t bufs,
                   int64_t align, int64_t frameextra,
                   uint32_t fourcc, const uint8_t *guid,
-                  const void *meta, int64_t metasz)
+                  const void *meta, int64_t metasz, int64_t payloadSize)
 {
     close();
 
-    if (metasz < 0 || frameextra < 0)
+    if (metasz < 0 || frameextra < 0 || payloadSize < 0)
         return false;
 
     if (align <= 0) align = k_defAlign;
@@ -614,7 +628,7 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, audio_form
         return false;
 
     int64_t payload = 0, fvHdr = 0, blocksz = 0, useroffset = 0, dataoffset = 0, total = 0;
-    if (!calcPayload(ch, fmt, sampleRate, fps, payload)
+    if (!calcPayload(ch, fmt, sampleRate, fps, payloadSize, payload)
         || !computeLayout(payload, align, bufs, frameStride, metasz,
                           fvHdr, blocksz, useroffset, dataoffset, total))
         return false;
@@ -654,6 +668,7 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, audio_form
         *(int64_t*)(p + hv_frameextra) = frameStride;
         *(int64_t*)(p + hv_useroffset) = useroffset;
         *(int64_t*)(p + hv_dataoffset) = dataoffset;
+        *(int64_t*)(p + hv_payloadsize) = payload;
 
         if (metasz > 0 && meta)
         {
@@ -669,7 +684,8 @@ bool memaud::open(const std::string &sName, bool bCreate, int64_t ch, audio_form
              || *(int64_t*)(p + hv_samplerate) != sampleRate
              || *(int64_t*)(p + hv_fps)        != fps
              || *(int64_t*)(p + hv_bufs)       != bufs
-             || *(int64_t*)(p + hv_blocksz)    != blocksz)
+             || *(int64_t*)(p + hv_blocksz)    != blocksz
+             || *(int64_t*)(p + hv_payloadsize) != payload)
     {
         close();
         return false;

@@ -367,7 +367,8 @@ public:
 
     /** Create an audio ring buffer.
      *
-     *  Buffer slot size is ceil(sampleRate / fps) * ch * bytesPerSample.
+     *  Buffer slot size is ceil(sampleRate / fps) * ch * bytesPerSample for
+     *  known PCM formats, or @p payloadSize for audio_format::userType.
      *
      *  @param name        Share name (POSIX: must start with '/').
      *  @param ch          Number of interleaved channels.
@@ -375,11 +376,14 @@ public:
      *  @param sampleRate  Sample rate in Hz.
      *  @param fps         Buffers per second.
      *  @param bufs        Number of buffer slots in the ring.
+     *  @param payloadSize Per-slot payload bytes. Required for audio_format::userType.
      *  @returns true on success.
      */
     bool open(const std::string &name, int64_t ch, audio_format fmt,
-              int64_t sampleRate, int64_t fps, int64_t bufs)
-    { return m_aud.open(name, true, ch, fmt, sampleRate, fps, bufs); }
+              int64_t sampleRate, int64_t fps, int64_t bufs,
+              int64_t payloadSize = 0)
+    { return m_aud.open(name, true, ch, fmt, sampleRate, fps, bufs,
+                        0, 0, 0, nullptr, nullptr, 0, payloadSize); }
 
     /** Fill a buffer slot with a constant byte value (e.g. 0 for silence).
      *  @param idx  Slot index; wrapped modulo getBufs().
